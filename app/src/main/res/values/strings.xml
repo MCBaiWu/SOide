@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SOide</string>
+    <string name="select_file">选择 SO/ELF 文件</string>
+    <string name="parsing">正在解析…</string>
+    <string name="parse_success">解析完成</string>
+    <string name="parse_failed">解析失败</string>
+    <string name="elf_header">ELF 文件头</string>
+    <string name="section_headers">节区头表</string>
+    <string name="program_headers">程序头表</string>
+    <string name="symbol_table">符号表</string>
+    <string name="dynamic_section">动态段</string>
+    <string name="no_file_selected">请选择要解析的 .so 文件</string>
+</resources>
