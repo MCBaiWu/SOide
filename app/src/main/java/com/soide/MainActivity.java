@@ -126,5 +126,8 @@ public class MainActivity extends AppCompatActivity {
     private void showProgress(boolean show) {
         progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
         btnSelectFile.setEnabled(!show);
+        if (show) {
+            progressBar.setIndeterminate(true);
+        }
     }
 }

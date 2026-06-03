@@ -95,7 +95,7 @@
         android:layout_height="wrap_content"
         android:visibility="gone"
         android:layout_marginTop="8dp"
-        app:indeterminate="true"
-        app:indicatorColor="?attr/colorPrimary" />
+        app:indicatorColor="?attr/colorPrimary"
+        app:trackColor="?attr/colorSurfaceVariant" />
 
 </LinearLayout>
