@@ -2,12 +2,16 @@ package com.soide.ui;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.text.TextPaint;
 import android.util.AttributeSet;
 import android.util.TypedValue;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -18,18 +22,29 @@ import com.soide.elf.ControlFlowAnalyzer;
 import com.soide.elf.DisassembledInstruction;
 import com.soide.util.ThemeUtils;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 
 /**
- * 控制流图 Canvas 视图。
+ * 控制流图 (CFG) Canvas 视图。
  * <p>
- * 布局策略：
- * - 基本块自上而下排成一列
- * - 块内画 1 个圆角矩形 + 标题 + 最多 6 行指令
- * - 边从源块底部出发，到达目标块顶部，颜色按边类型（真绿/假红/默认蓝）
- * - 前向边走右侧通道，回边走左侧通道 — 保证不穿块
+ * v1.4.5 改进：
+ * <ul>
+ *   <li>布局：BFS 层级布局 (树状)，每个基本块 y 由其层级决定，x 在层级内均匀分布
+ *       (针对环 / 多入口：同块只放一个位置)</li>
+ *   <li>边：紧邻前向走短竖线；非紧邻前向走右侧通道；回边走左侧通道 — 绝不穿块</li>
+ *   <li>边颜色：TRUE_BRANCH 绿 / FALSE_BRANCH 红 / UNCONDITIONAL 蓝</li>
+ *   <li>手势：单指拖动 (pan) + 双指捏合 (zoom)，自适应 day/night</li>
+ *   <li>块填充：跟随 ?attr/colorSurface (夜间深、昼间浅)；entry 块用 ?attr/colorPrimaryContainer</li>
+ * </ul>
  */
 public class CfgCanvasView extends View {
 
@@ -37,9 +52,12 @@ public class CfgCanvasView extends View {
     private static final float BLOCK_LINE_H_DP = 16f;
     private static final float BLOCK_PAD_H_DP = 14f;
     private static final float BLOCK_PAD_V_DP = 10f;
-    private static final float BLOCK_GAP_DP = 28f;       // 块间竖直间距
-    private static final float EDGE_OFFSET_DP = 16f;     // 边通道距块的偏移
+    private static final float BLOCK_GAP_X_DP = 36f;
+    private static final float BLOCK_GAP_Y_DP = 36f;
+    private static final float EDGE_OFFSET_DP = 18f;
     private static final float TEXT_SIZE_DP = 11f;
+    private static final float MIN_SCALE = 0.3f;
+    private static final float MAX_SCALE = 3.0f;
 
     private ControlFlowAnalyzer.CFG cfg;
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -47,10 +65,21 @@ public class CfgCanvasView extends View {
     private final Paint blockStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint labelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint arrowFill = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final Map<Long, RectF> blockRects = new HashMap<>();  // block -> rect
+    private final Map<Long, RectF> blockRects = new HashMap<>();
+    private final Map<Long, Integer> blockLevel = new HashMap<>();
+    private final Map<Integer, List<Long>> levelBlocks = new HashMap<>();
+
     private float contentWidth = 0f;
     private float contentHeight = 0f;
+
+    // === 手势 ===
+    private float scale = 1f;
+    private float offsetX = 0f;
+    private float offsetY = 0f;
+    private ScaleGestureDetector scaleDetector;
+    private GestureDetector gestureDetector;
 
     public CfgCanvasView(Context context) { super(context); init(context); }
     public CfgCanvasView(Context context, @Nullable AttributeSet a) { super(context, a); init(context); }
@@ -69,14 +98,108 @@ public class CfgCanvasView extends View {
         edgePaint.setStyle(Paint.Style.STROKE);
         edgePaint.setStrokeWidth(dp(ctx, 1.6f));
         edgePaint.setStrokeCap(Paint.Cap.ROUND);
-        setLayerType(LAYER_TYPE_SOFTWARE, null); // 路径需要硬件加速下抗锯齿
+        arrowFill.setStyle(Paint.Style.FILL);
+        setLayerType(LAYER_TYPE_SOFTWARE, null);
+
+        // 手势检测
+        scaleDetector = new ScaleGestureDetector(ctx, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                float factor = detector.getScaleFactor();
+                scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * factor));
+                invalidate();
+                return true;
+            }
+        });
+        gestureDetector = new GestureDetector(ctx, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
+                offsetX -= dx;
+                offsetY -= dy;
+                invalidate();
+                return true;
+            }
+            @Override
+            public boolean onDown(MotionEvent e) { return true; }
+        });
     }
 
     public void setCfg(ControlFlowAnalyzer.CFG cfg) {
         this.cfg = cfg;
         blockRects.clear();
+        blockLevel.clear();
+        levelBlocks.clear();
         requestLayout();
         invalidate();
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        boolean a = scaleDetector.onTouchEvent(ev);
+        boolean b = gestureDetector.onTouchEvent(ev);
+        return a || b || super.onTouchEvent(ev);
+    }
+
+    /** 计算每个 block 所属的"层级"，用于树状布局。BFS 从 entry 开始。 */
+    private void computeLevels() {
+        blockLevel.clear();
+        levelBlocks.clear();
+        if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) return;
+
+        // 找 entry
+        ControlFlowAnalyzer.Block entry = null;
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            if (b.isEntry) { entry = b; break; }
+        }
+        if (entry == null) entry = cfg.blocks.get(0);
+
+        Queue<ControlFlowAnalyzer.Block> q = new ArrayDeque<>();
+        Set<Long> visited = new HashSet<>();
+        q.add(entry);
+        blockLevel.put(entry.startAddr, 0);
+        visited.add(entry.startAddr);
+        addToLevel(0, entry.startAddr);
+
+        while (!q.isEmpty()) {
+            ControlFlowAnalyzer.Block cur = q.poll();
+            int curLevel = blockLevel.get(cur.startAddr);
+            for (ControlFlowAnalyzer.Edge e : cur.successors) {
+                if (visited.contains(e.to)) continue;
+                visited.add(e.to);
+                int nl = curLevel + 1;
+                blockLevel.put(e.to, nl);
+                addToLevel(nl, e.to);
+                ControlFlowAnalyzer.Block next = findBlock(e.to);
+                if (next != null) q.add(next);
+            }
+        }
+        // unreachable blocks → 放在最后一行
+        int maxLevel = 0;
+        for (int l : blockLevel.values()) if (l > maxLevel) maxLevel = l;
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            if (!visited.contains(b.startAddr)) {
+                int l = maxLevel + 1;
+                blockLevel.put(b.startAddr, l);
+                addToLevel(l, b.startAddr);
+            }
+        }
+    }
+
+    private void addToLevel(int level, long addr) {
+        List<Long> list = levelBlocks.get(level);
+        if (list == null) {
+            list = new ArrayList<>();
+            levelBlocks.put(level, list);
+        }
+        list.add(addr);
+    }
+
+    private ControlFlowAnalyzer.Block findBlock(long addr) {
+        if (cfg == null) return null;
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            if (b.startAddr == addr) return b;
+        }
+        return null;
     }
 
     @Override
@@ -87,20 +210,18 @@ public class CfgCanvasView extends View {
         }
         Context ctx = getContext();
         float pad = dp(ctx, BLOCK_PAD_H_DP);
-        float maxW = dp(ctx, 320f);  // 单块最大宽度
-        // 估算每块高度：标题 + 最多6行指令
+        float maxW = dp(ctx, 280f);
         float lineH = dp(ctx, BLOCK_LINE_H_DP);
         float titleH = dp(ctx, BLOCK_TITLE_H_DP);
         float vPad = dp(ctx, BLOCK_PAD_V_DP);
-        float gap = dp(ctx, BLOCK_GAP_DP);
+        float gapX = dp(ctx, BLOCK_GAP_X_DP);
+        float gapY = dp(ctx, BLOCK_GAP_Y_DP);
         float edgeOff = dp(ctx, EDGE_OFFSET_DP);
 
-        // 收集每块高度 + 计算最宽宽度
-        float totalH = gap;
+        // 计算每块高 / 宽
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             int lines = Math.min(8, b.instructions.size());
             float h = vPad * 2 + titleH + lineH * lines;
-            // 测每行宽度取最大
             float w = 0f;
             String addrTxt = String.format(Locale.US, "0x%x", b.startAddr);
             w = Math.max(w, textPaint.measureText(addrTxt));
@@ -111,18 +232,32 @@ public class CfgCanvasView extends View {
                 w = Math.max(w, textPaint.measureText(line));
             }
             float blockW = Math.min(maxW, pad * 2 + w);
-            w = blockW;
+            b.extraMeasuredWidth = blockW;
             b.extraMeasuredHeight = h;
-            b.extraMeasuredWidth = w;
-            totalH += h + gap;
         }
-        // 内容宽: 单块宽 + 左右边通道
-        contentWidth = (cfg.blocks.isEmpty() ? 0 : cfg.blocks.get(0).extraMeasuredWidth)
-                + edgeOff * 2 + dp(ctx, 8f);
+
+        // 树状布局：按层级摆放
+        computeLevels();
+        int maxLevel = 0;
+        int widestLevelCount = 0;
+        for (int l : levelBlocks.keySet()) {
+            if (l > maxLevel) maxLevel = l;
+            if (levelBlocks.get(l).size() > widestLevelCount) widestLevelCount = levelBlocks.get(l).size();
+        }
+        // 最宽层决定总宽
+        float maxBlockW = 0f;
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            if (b.extraMeasuredWidth > maxBlockW) maxBlockW = b.extraMeasuredWidth;
+        }
+        float totalW = widestLevelCount * (maxBlockW + gapX) - gapX + edgeOff * 2 + dp(ctx, 16f);
+        float totalH = (maxLevel + 1) * (dp(ctx, 60f) + gapY) + dp(ctx, 32f);
+        if (totalW < dp(ctx, 320f)) totalW = dp(ctx, 320f);
+        if (totalH < dp(ctx, 240f)) totalH = dp(ctx, 240f);
+        contentWidth = totalW;
         contentHeight = totalH;
 
-        int width = resolveSize((int) Math.ceil(contentWidth + dp(ctx, 16f)), widthMeasureSpec);
-        int height = resolveSize((int) Math.ceil(contentHeight + dp(ctx, 16f)), heightMeasureSpec);
+        int width = resolveSize((int) Math.ceil(contentWidth), widthMeasureSpec);
+        int height = resolveSize((int) Math.ceil(contentHeight), heightMeasureSpec);
         setMeasuredDimension(width, height);
     }
 
@@ -132,63 +267,85 @@ public class CfgCanvasView extends View {
         if (cfg == null || cfg.blocks.isEmpty()) return;
         Context ctx = getContext();
 
-        float gap = dp(ctx, BLOCK_GAP_DP);
-        float pad = dp(ctx, BLOCK_PAD_H_DP);
-        float vPad = dp(ctx, BLOCK_PAD_V_DP);
-        float titleH = dp(ctx, BLOCK_TITLE_H_DP);
-        float lineH = dp(ctx, BLOCK_LINE_H_DP);
-        float edgeOff = dp(ctx, EDGE_OFFSET_DP);
-        float left = edgeOff + dp(ctx, 8f);
+        // 主题色 (跟随 day/night)
+        int surface = ThemeUtils.colorSurface(ctx);
+        int surfaceVariant = ThemeUtils.colorSurfaceVariant(ctx);
+        int onSurface = ThemeUtils.colorOnSurface(ctx);
+        c.drawColor(surface);
 
-        // 计算每块位置
-        float y = gap;
+        // 应用平移/缩放
+        c.save();
+        c.translate(offsetX, offsetY);
+        c.scale(scale, scale);
+
+        float gapX = dp(ctx, BLOCK_GAP_X_DP);
+        float gapY = dp(ctx, BLOCK_GAP_Y_DP);
+        float edgeOff = dp(ctx, EDGE_OFFSET_DP);
+        float blockY0 = dp(ctx, 16f);
+
+        // 计算每块 (x, y)
+        blockRects.clear();
+        // 每层总宽，居中
+        float maxBlockW = 0f;
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
-            float w = b.extraMeasuredWidth;
-            float h = b.extraMeasuredHeight;
-            float x = left;
-            RectF r = new RectF(x, y, x + w, y + h);
-            blockRects.put(b.startAddr, r);
-            y += h + gap;
+            if (b.extraMeasuredWidth > maxBlockW) maxBlockW = b.extraMeasuredWidth;
+        }
+        for (Map.Entry<Integer, List<Long>> e : levelBlocks.entrySet()) {
+            int level = e.getKey();
+            List<Long> addrs = e.getValue();
+            float layerW = addrs.size() * (maxBlockW + gapX) - gapX;
+            float layerX0 = edgeOff + dp(ctx, 8f) + (contentWidth - edgeOff * 2 - dp(ctx, 16f) - layerW) / 2f;
+            for (int i = 0; i < addrs.size(); i++) {
+                long addr = addrs.get(i);
+                ControlFlowAnalyzer.Block b = findBlock(addr);
+                if (b == null) continue;
+                float x = layerX0 + i * (maxBlockW + gapX);
+                float y = blockY0 + level * (dp(ctx, 60f) + gapY);
+                RectF r = new RectF(x, y, x + b.extraMeasuredWidth, y + b.extraMeasuredHeight);
+                blockRects.put(addr, r);
+            }
         }
 
-        // 1) 画边（先画，使块覆盖在上层）
+        // 1) 画边
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             RectF src = blockRects.get(b.startAddr);
             if (src == null) continue;
             for (ControlFlowAnalyzer.Edge e : b.successors) {
                 RectF dst = blockRects.get(e.to);
                 if (dst == null) continue;
-                drawEdge(c, src, dst, e);
+                drawEdge(c, src, dst, e, onSurface);
             }
         }
         // 2) 画块
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             RectF r = blockRects.get(b.startAddr);
             if (r == null) continue;
-            drawBlock(c, b, r);
+            drawBlock(c, b, r, surface, surfaceVariant, onSurface);
         }
+
+        c.restore();
     }
 
-    private void drawBlock(Canvas c, ControlFlowAnalyzer.Block b, RectF r) {
+    private void drawBlock(Canvas c, ControlFlowAnalyzer.Block b, RectF r,
+                           int surface, int surfaceVariant, int onSurface) {
         Context ctx = getContext();
-        int surface = ThemeUtils.colorSurface(ctx);
-        int surfaceVariant = ThemeUtils.colorSurfaceVariant(ctx);
-        int primary = ThemeUtils.colorPrimary(ctx);
-        int onSurface = ThemeUtils.colorOnSurface(ctx);
-        int onPrimary = ThemeUtils.colorOnPrimary(ctx);
-
-        // 背景
-        blockFill.setColor(b.isEntry ? primary : surface);
-        c.drawRoundRect(r, 8f, 8f, blockFill);
-        blockStroke.setColor(b.isExit ? ContextCompat.getColor(ctx, R.color.md_theme_light_error)
-                : ThemeUtils.colorOutline(ctx));
+        // 背景：entry 用 primary tint，exit 用 error tint，普通块用 surface
+        int fill;
+        if (b.isEntry) fill = ThemeUtils.colorPrimary(ctx);
+        else if (b.isExit) fill = ThemeUtils.colorError(ctx);
+        else fill = surface;
+        blockFill.setColor(fill);
+        c.drawRoundRect(r, dp(ctx, 8f), dp(ctx, 8f), blockFill);
+        int stroke = b.isExit ? ThemeUtils.colorError(ctx) : ThemeUtils.colorOutline(ctx);
+        blockStroke.setColor(stroke);
         blockStroke.setStrokeWidth(b.isExit ? dp(ctx, 2.2f) : dp(ctx, 1.2f));
-        c.drawRoundRect(r, 8f, 8f, blockStroke);
+        c.drawRoundRect(r, dp(ctx, 8f), dp(ctx, 8f), blockStroke);
 
-        // 标题 (地址)
+        // 标题
         float textX = r.left + dp(ctx, BLOCK_PAD_H_DP);
         float titleY = r.top + dp(ctx, BLOCK_PAD_V_DP) + dp(ctx, BLOCK_TITLE_H_DP) - dp(ctx, 3f);
-        textPaint.setColor(b.isEntry ? onPrimary : onSurface);
+        int titleColor = (b.isEntry || b.isExit) ? Color.WHITE : onSurface;
+        textPaint.setColor(titleColor);
         textPaint.setFakeBoldText(true);
         textPaint.setTextSize(sp(ctx, 12f));
         String tag = (b.isEntry ? "▶ ENTRY " : (b.isExit ? "■ EXIT  " : "BB     "))
@@ -200,22 +357,20 @@ public class CfgCanvasView extends View {
         // 指令
         float insY = titleY + dp(ctx, BLOCK_LINE_H_DP);
         float lineH = dp(ctx, BLOCK_LINE_H_DP);
+        int branchColor = ThemeUtils.colorPrimary(ctx);
+        int normalColor = (b.isEntry || b.isExit) ? Color.WHITE
+                : ThemeUtils.colorOnSurfaceVariant(ctx);
         for (int i = 0; i < Math.min(8, b.instructions.size()); i++) {
             DisassembledInstruction ins = b.instructions.get(i);
             String mn = ins.mnemonic != null ? ins.mnemonic : "";
             String op = ins.opStr != null ? ins.opStr : "";
             String line = String.format(Locale.US, "%-7s %s", mn, op);
-            // 高亮分支指令
-            if (isBranchMnemonic(mn)) {
-                textPaint.setColor(ContextCompat.getColor(ctx, R.color.md_theme_light_primary));
-            } else {
-                textPaint.setColor(b.isEntry ? onPrimary : ThemeUtils.colorOnSurfaceVariant(ctx));
-            }
+            textPaint.setColor(isBranchMnemonic(mn) ? branchColor : normalColor);
             c.drawText(line, textX, insY + i * lineH, textPaint);
         }
     }
 
-    private void drawEdge(Canvas c, RectF src, RectF dst, ControlFlowAnalyzer.Edge e) {
+    private void drawEdge(Canvas c, RectF src, RectF dst, ControlFlowAnalyzer.Edge e, int onSurface) {
         Context ctx = getContext();
         int color;
         switch (e.kind) {
@@ -226,15 +381,16 @@ public class CfgCanvasView extends View {
         }
         edgePaint.setColor(color);
         labelPaint.setColor(color);
+        arrowFill.setColor(color);
 
         boolean forward = dst.top >= src.top;
-        boolean adjacent = Math.abs(dst.top - src.bottom) < dp(ctx, BLOCK_GAP_DP) + 4f
-                && Math.abs(src.centerX() - dst.centerX()) < 1f;
+        boolean adjacent = forward
+                && Math.abs(src.centerX() - dst.centerX()) < dp(ctx, 4f)
+                && Math.abs(dst.top - src.bottom) <= dp(ctx, BLOCK_GAP_Y_DP) + 4f;
 
         Path path = new Path();
 
-        if (adjacent && forward) {
-            // 紧邻的下个块: 短竖线
+        if (adjacent) {
             float x = src.centerX();
             path.moveTo(x, src.bottom);
             path.lineTo(x, dst.top - 6f);
@@ -243,7 +399,7 @@ public class CfgCanvasView extends View {
             return;
         }
 
-        // 走侧通道，避免穿块
+        // 侧通道
         float sideX;
         if (forward) {
             sideX = src.right + dp(ctx, EDGE_OFFSET_DP);
@@ -255,7 +411,6 @@ public class CfgCanvasView extends View {
         float labelX = sideX + dp(ctx, 4f);
         float labelY;
         if (forward) {
-            // 前向边: 源 -> 右侧通道 -> 目标上沿
             path.moveTo(src.centerX(), src.bottom);
             path.lineTo(sideX, src.bottom);
             path.lineTo(sideX, dst.top - 6f);
@@ -264,8 +419,8 @@ public class CfgCanvasView extends View {
             arrowY = dst.top;
             labelY = (src.bottom + dst.top) / 2f;
         } else {
-            // 回边: 源 -> 侧通道 -> 目标底部进入
-            float enterX = dst.centerX() - dp(ctx, 8f);
+            float enterX = dst.centerX() + dp(ctx, 8f);
+            if (enterX > dst.right - dp(ctx, 4f)) enterX = dst.right - dp(ctx, 4f);
             path.moveTo(src.centerX(), src.bottom);
             path.lineTo(sideX, src.bottom);
             path.lineTo(sideX, dst.bottom + 2f);
@@ -293,10 +448,8 @@ public class CfgCanvasView extends View {
         p.lineTo(x - l * dx + l * 0.4f * dy, y - l * dy - l * 0.4f * dx);
         p.lineTo(x - l * dx - l * 0.4f * dy, y - l * dy + l * 0.4f * dx);
         p.close();
-        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fill.setStyle(Paint.Style.FILL);
-        fill.setColor(color);
-        c.drawPath(p, fill);
+        arrowFill.setColor(color);
+        c.drawPath(p, arrowFill);
     }
 
     private static boolean isBranchMnemonic(String mn) {

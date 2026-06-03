@@ -780,6 +780,39 @@ public class ElfParser {
         // 对函数按地址排序
         java.util.Collections.sort(all, (a, b) -> Long.compare(a.address, b.address));
         elfFile.functions = all;
+
+        // 1.4.5: 字符串引用分析（ARM32 / ARM64）
+        runStringReferenceAnalysis(all);
+    }
+
+    /**
+     * 对每个函数做字符串引用分析，关联 LDR/ADR/ADRP+ADD/LDR 指令和字符串内容。
+     * 结果会写回 {@link DisassembledInstruction#referencedString}，UI 高亮显示。
+     */
+    private void runStringReferenceAnalysis(List<FunctionInfo> funcs) {
+        if (funcs == null || funcs.isEmpty()) return;
+        if (elfFile.header.eMachine != ElfConstants.EM_ARM
+                && elfFile.header.eMachine != ElfConstants.EM_AARCH64) return;
+
+        // 构造 SectionInfo[]
+        List<StringReferenceAnalyzer.SectionInfo> list = new ArrayList<>();
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.shType == ElfConstants.SHT_NOBITS) continue;
+            list.add(new StringReferenceAnalyzer.SectionInfo(
+                    sh.name, sh.shAddr, sh.shSize));
+        }
+        StringReferenceAnalyzer.SectionInfo[] sections = list.toArray(new StringReferenceAnalyzer.SectionInfo[0]);
+        StringReferenceAnalyzer analyzer = StringReferenceAnalyzerFactory.create(
+                elfFile.header.eMachine, sections, data);
+        if (analyzer == null) return;
+        for (FunctionInfo fi : funcs) {
+            if (fi.instructions == null || fi.instructions.isEmpty()) continue;
+            try {
+                analyzer.analyze(fi, fi.instructions);
+            } catch (Throwable t) {
+                Log.w("ElfParser", "stringRef analyze failed for " + fi.name, t);
+            }
+        }
     }
 
     private static final long DEFAULT_FUNC_SIZE = 32;

@@ -1,32 +1,51 @@
 package com.soide.ui;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.button.MaterialButton;
 import com.soide.R;
+import com.soide.util.PermissionHelper;
+import com.soide.util.ThemeUtils;
+
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 设置 fragment：100% Java MD3 风格。
  * <p>
  * 支持：
  * - 主题: 跟随系统 / 白天 / 黑夜
+ * - 权限: 申请所有运行时权限
  * - 关于: App / NDK 版本 / GitHub
+ * <p>
+ * 全部色值走 {@link ThemeUtils}，白天/黑夜自动切换。
  */
 public class SettingsFragment extends Fragment {
 
@@ -39,9 +58,13 @@ public class SettingsFragment extends Fragment {
     public static final int THEME_LIGHT  = 1;
     public static final int THEME_DARK   = 2;
 
+    private static final int REQ_PERMS = 9001;
+
     private RadioGroup themeGroup;
     private TextView themeStatus;
     private final int[] themeRadioIds = new int[3];
+    private TextView permStatus;
+    private TextView permList;
 
     @Nullable
     @Override
@@ -53,7 +76,7 @@ public class SettingsFragment extends Fragment {
 
         NestedScrollView scroll = new NestedScrollView(ctx);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(ContextCompat.getColor(ctx, R.color.md_theme_light_background));
+        scroll.setBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout content = new LinearLayout(ctx);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -65,7 +88,7 @@ public class SettingsFragment extends Fragment {
         title.setText("设置");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
-        title.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onBackground));
+        title.setTextColor(ThemeUtils.colorOnSurface(ctx));
         content.addView(title);
 
         TextView sub = new TextView(ctx);
@@ -73,14 +96,18 @@ public class SettingsFragment extends Fragment {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subLp.topMargin = dp(2);
         sub.setLayoutParams(subLp);
-        sub.setText("主题 / 关于");
+        sub.setText("主题 / 权限 / 关于");
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        sub.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurfaceVariant));
+        sub.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         content.addView(sub);
 
         // === 主题卡片 ===
         content.addView(buildSectionTitle(ctx, "外观"));
         content.addView(buildThemeCard(ctx));
+
+        // === 权限卡片 ===
+        content.addView(buildSectionTitle(ctx, "权限"));
+        content.addView(buildPermissionCard(ctx));
 
         // === 关于卡片 ===
         content.addView(buildSectionTitle(ctx, "关于"));
@@ -99,7 +126,7 @@ public class SettingsFragment extends Fragment {
         t.setText(s);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         t.setTypeface(t.getTypeface(), android.graphics.Typeface.BOLD);
-        t.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurfaceVariant));
+        t.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         return t;
     }
 
@@ -107,7 +134,7 @@ public class SettingsFragment extends Fragment {
         MaterialCardView card = new MaterialCardView(ctx);
         card.setRadius(dp(20));
         card.setCardElevation(dp(2));
-        card.setCardBackgroundColor(ContextCompat.getColor(ctx, R.color.md_theme_light_surface));
+        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout inner = new LinearLayout(ctx);
         inner.setOrientation(LinearLayout.VERTICAL);
@@ -117,7 +144,7 @@ public class SettingsFragment extends Fragment {
         head.setText("主题风格");
         head.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         head.setTypeface(head.getTypeface(), android.graphics.Typeface.BOLD);
-        head.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurface));
+        head.setTextColor(ThemeUtils.colorOnSurface(ctx));
         inner.addView(head);
 
         TextView desc = new TextView(ctx);
@@ -127,7 +154,7 @@ public class SettingsFragment extends Fragment {
         desc.setLayoutParams(dl);
         desc.setText("选择应用外观。修改后立即生效。");
         desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        desc.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurfaceVariant));
+        desc.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         inner.addView(desc);
 
         themeGroup = new RadioGroup(ctx);
@@ -167,7 +194,7 @@ public class SettingsFragment extends Fragment {
         themeStatus.setLayoutParams(sl);
         themeStatus.setText("当前: " + themeName(current));
         themeStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        themeStatus.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_primary));
+        themeStatus.setTextColor(ThemeUtils.colorPrimary(ctx));
         inner.addView(themeStatus);
 
         card.addView(inner);
@@ -180,7 +207,8 @@ public class SettingsFragment extends Fragment {
         rb.setId(rid);
         rb.setText(title);
         rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        rb.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurface));
+        rb.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        rb.setButtonTintList(android.content.res.ColorStateList.valueOf(ThemeUtils.colorPrimary(ctx)));
         rb.setPadding(dp(8), dp(10), dp(8), dp(10));
         themeRadioIds[mode] = rid;
         group.addView(rb);
@@ -193,11 +221,138 @@ public class SettingsFragment extends Fragment {
         return -1;
     }
 
+    private View buildPermissionCard(Context ctx) {
+        MaterialCardView card = new MaterialCardView(ctx);
+        card.setRadius(dp(20));
+        card.setCardElevation(dp(2));
+        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
+
+        LinearLayout inner = new LinearLayout(ctx);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setPadding(dp(20), dp(16), dp(20), dp(20));
+
+        TextView head = new TextView(ctx);
+        head.setText("文件读写 / 编辑权限");
+        head.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        head.setTypeface(head.getTypeface(), android.graphics.Typeface.BOLD);
+        head.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        inner.addView(head);
+
+        TextView desc = new TextView(ctx);
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dl.topMargin = dp(4);
+        desc.setLayoutParams(dl);
+        desc.setText("申请读取、写入、修改 .so 文件的全部所需权限。");
+        desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        desc.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
+        inner.addView(desc);
+
+        permStatus = new TextView(ctx);
+        LinearLayout.LayoutParams psl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        psl.topMargin = dp(8);
+        permStatus.setLayoutParams(psl);
+        permStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        permStatus.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        inner.addView(permStatus);
+
+        permList = new TextView(ctx);
+        LinearLayout.LayoutParams pll = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pll.topMargin = dp(6);
+        permList.setLayoutParams(pll);
+        permList.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        permList.setTypeface(android.graphics.Typeface.MONOSPACE);
+        permList.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
+        inner.addView(permList);
+
+        MaterialButton requestBtn = new MaterialButton(ctx);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(12);
+        requestBtn.setLayoutParams(blp);
+        requestBtn.setText("申请全部权限");
+        requestBtn.setCornerRadius(dp(16));
+        requestBtn.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ThemeUtils.colorPrimary(ctx)));
+        requestBtn.setTextColor(ThemeUtils.colorOnPrimary(ctx));
+        requestBtn.setOnClickListener(v -> requestAllPermissions());
+        inner.addView(requestBtn);
+
+        card.addView(inner);
+
+        // 立即刷新一次状态
+        refreshPermissionStatus();
+
+        return card;
+    }
+
+    private void refreshPermissionStatus() {
+        if (permStatus == null || permList == null) return;
+        Context ctx = getContext();
+        if (ctx == null) return;
+        List<String> all = PermissionHelper.allRequiredPermissions();
+        int granted = 0;
+        StringBuilder sb = new StringBuilder();
+        for (String p : all) {
+            boolean ok = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED;
+            if (ok) {
+                granted++;
+                sb.append("✓ ").append(p).append('\n');
+            } else {
+                sb.append("✗ ").append(p).append('\n');
+            }
+        }
+        if (granted == all.size()) {
+            permStatus.setText("当前: 全部已授权 (" + granted + "/" + all.size() + ")");
+            permStatus.setTextColor(ThemeUtils.colorPrimary(ctx));
+        } else {
+            permStatus.setText("当前: " + granted + "/" + all.size() + " 已授权");
+            permStatus.setTextColor(ThemeUtils.colorError(ctx));
+        }
+        permList.setText(sb.toString().trim());
+    }
+
+    private void requestAllPermissions() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        List<String> toAsk = new ArrayList<>();
+        for (String p : PermissionHelper.allRequiredPermissions()) {
+            if (ContextCompat.checkSelfPermission(ctx, p) != PackageManager.PERMISSION_GRANTED) {
+                toAsk.add(p);
+            }
+        }
+        if (toAsk.isEmpty()) {
+            Toast.makeText(ctx, "全部权限已授权", Toast.LENGTH_SHORT).show();
+            refreshPermissionStatus();
+            return;
+        }
+        androidx.fragment.app.FragmentActivity fa = getActivity();
+        if (fa == null) return;
+        ActivityCompat.requestPermissions(fa, toAsk.toArray(new String[0]), REQ_PERMS);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_PERMS) {
+            Context ctx = getContext();
+            if (ctx == null) return;
+            int granted = 0;
+            for (int r : grantResults) {
+                if (r == PackageManager.PERMISSION_GRANTED) granted++;
+            }
+            Toast.makeText(ctx, "已授权 " + granted + " / " + grantResults.length, Toast.LENGTH_SHORT).show();
+            refreshPermissionStatus();
+        }
+    }
+
     private View buildAboutCard(Context ctx) {
         MaterialCardView card = new MaterialCardView(ctx);
         card.setRadius(dp(20));
         card.setCardElevation(dp(2));
-        card.setCardBackgroundColor(ContextCompat.getColor(ctx, R.color.md_theme_light_surface));
+        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout inner = new LinearLayout(ctx);
         inner.setOrientation(LinearLayout.VERTICAL);
@@ -220,10 +375,21 @@ public class SettingsFragment extends Fragment {
         lp.topMargin = dp(6);
         row.setLayoutParams(lp);
         row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackground(android.graphics.drawable.ripple.ColorDrawable()); // 点击水波
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(v -> {
+            // 点击行复制 value
+            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText(key, value));
+                Toast.makeText(ctx, "已复制: " + value, Toast.LENGTH_SHORT).show();
+            }
+        });
 
         TextView k = new TextView(ctx);
         k.setText(key);
-        k.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurfaceVariant));
+        k.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         k.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(dp(80),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -232,7 +398,7 @@ public class SettingsFragment extends Fragment {
 
         TextView v = new TextView(ctx);
         v.setText(value);
-        v.setTextColor(ContextCompat.getColor(ctx, R.color.md_theme_light_onSurface));
+        v.setTextColor(ThemeUtils.colorOnSurface(ctx));
         v.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         v.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
