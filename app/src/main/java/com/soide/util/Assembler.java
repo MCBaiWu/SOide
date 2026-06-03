@@ -28,7 +28,7 @@ public final class Assembler {
         public final boolean ok;
         public final String error;
 
-        Result(String hex, byte[] bytes, boolean ok, String error) {
+        public Result(String hex, byte[] bytes, boolean ok, String error) {
             this.hex = hex;
             this.bytes = bytes;
             this.ok = ok;
