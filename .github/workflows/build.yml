@@ -31,16 +31,9 @@ jobs:
           tar xf capstone.tar.gz
           mv capstone-next capstone
           rm capstone.tar.gz
-          # 只保留 ARM + AArch64 架构
           cd capstone
-          for d in arch/*; do
-              name=$(basename "$d")
-              case "$name" in
-                  ARM|AArch64) ;;
-                  *) rm -rf "$d" ;;
-              esac
-          done
           # 移除不必要的目录与文件（保留 suite/fuzz/ 因为 capstone CMakeLists.txt 引用）
+          # 注意：cs.c 静态 #include 所有 arch/*/Module.h，所以不能删 arch 子目录
           rm -rf tests docs cstool bindings windowsce msvc xcode windows \
                  cross_configs CMakePresets.json COMPILE.MS* \
                  COMPILE_MAKE.TXT CONTRIB* CREDITS* SPONSORS* \
