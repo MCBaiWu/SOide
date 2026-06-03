@@ -199,6 +199,7 @@ public class CfgCanvasView extends View {
 
         // 指令
         float insY = titleY + dp(ctx, BLOCK_LINE_H_DP);
+        float lineH = dp(ctx, BLOCK_LINE_H_DP);
         for (int i = 0; i < Math.min(8, b.instructions.size()); i++) {
             DisassembledInstruction ins = b.instructions.get(i);
             String mn = ins.mnemonic != null ? ins.mnemonic : "";

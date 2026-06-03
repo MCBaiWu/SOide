@@ -201,7 +201,6 @@ public class SimplePseudoC implements PseudoCConverter {
             case "b.ls": case "bls": return "<=u";
             case "b.hs": case "bhs": return ">=u";
             case "b.lo": case "blo": return "<u";
-            case "b.eq": return "==";
             default: return "";
         }
     }
