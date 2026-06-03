@@ -1,48 +1,44 @@
 package com.soide.ui;
 
 import android.os.Bundle;
+import android.view.View;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
+import androidx.fragment.app.Fragment;
+import androidx.viewpager2.adapter.FragmentStateAdapter;
+import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.tabs.TabLayout;
+import com.google.android.material.tabs.TabLayoutMediator;
 import com.google.android.material.textview.MaterialTextView;
-import com.google.gson.Gson;
 import com.soide.R;
 import com.soide.elf.FunctionInfo;
 
-import java.io.File;
-import java.io.FileInputStream;
-
 /**
- * 函数详情：标题 + 元信息 + 反汇编指令列表。
- * 通过临时 json 文件传递 FunctionInfo。
+ * 函数详情：4 个标签页 - 汇编指令 / 控制流 / 伪 C / 交叉引用。
+ * 通过 {@link FuncDetailHost} 进程内共享 {@link FuncDetailData}。
  */
 public class FuncDetailActivity extends AppCompatActivity {
 
-    public static final String EXTRA_JSON_PATH = "json_path";
+    public static final String EXTRA_DATA_KEY = "data_key";
+
+    private static final String[] TAB_TITLES = {"汇编", "控制流", "伪 C", "交叉引用"};
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_func_detail);
 
-        String path = getIntent().getStringExtra(EXTRA_JSON_PATH);
-        if (path == null) {
-            finish();
-            return;
-        }
+        String key = getIntent().getStringExtra(EXTRA_DATA_KEY);
+        if (key == null) { finish(); return; }
 
-        FunctionInfo f;
-        try (FileInputStream in = new FileInputStream(new File(path))) {
-            byte[] buf = in.readAllBytes();
-            f = new Gson().fromJson(new String(buf, "UTF-8"), FunctionInfo.class);
-        } catch (Exception e) {
-            finish();
-            return;
-        }
+        FuncDetailData data = FuncDetailHost.loadData(key);
+        if (data == null || data.function == null) { finish(); return; }
+
+        FunctionInfo f = data.function;
 
         MaterialToolbar toolbar = findViewById(R.id.toolbar);
         if (toolbar != null) {
@@ -61,9 +57,36 @@ public class FuncDetailActivity extends AppCompatActivity {
         meta.append("  •  insns=").append(f.instructions != null ? f.instructions.size() : 0);
         tvMeta.setText(meta);
 
-        RecyclerView rv = findViewById(R.id.rv_asm);
-        rv.setLayoutManager(new LinearLayoutManager(this));
-        AsmAdapter adapter = new AsmAdapter(f.instructions);
-        rv.setAdapter(adapter);
+        ViewPager2 vp = findViewById(R.id.view_pager);
+        TabLayout tl = findViewById(R.id.tab_layout);
+        FuncDetailPagerAdapter adapter = new FuncDetailPagerAdapter(this, data);
+        vp.setAdapter(adapter);
+        new TabLayoutMediator(tl, vp, (tab, position) -> tab.setText(TAB_TITLES[position])).attach();
+    }
+
+    /** ViewPager2 适配器 */
+    static class FuncDetailPagerAdapter extends FragmentStateAdapter {
+        private final FuncDetailData data;
+
+        FuncDetailPagerAdapter(@NonNull AppCompatActivity a, FuncDetailData d) {
+            super(a);
+            this.data = d;
+        }
+
+        @NonNull
+        @Override
+        public Fragment createFragment(int position) {
+            switch (position) {
+                case 1: return ControlFlowTabFragment.newInstance(data);
+                case 2: return PseudoCTabFragment.newInstance(data);
+                case 3: return XRefTabFragment.newInstance(data);
+                default: return AsmTabFragment.newInstance(data);
+            }
+        }
+
+        @Override
+        public int getItemCount() {
+            return TAB_TITLES.length;
+        }
     }
 }

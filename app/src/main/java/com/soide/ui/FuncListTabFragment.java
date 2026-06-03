@@ -145,17 +145,21 @@ public class FuncListTabFragment extends Fragment {
     }
 
     private void openDetail(FunctionInfo f) {
-        // 序列化函数信息：使用 cacheDir 中的临时 json
+        // v1.4.2: 改为传递 FuncDetailData（包含 symbols/imports/machine），
+        // 让详情页的交叉引用/伪 C tab 能正确工作。
         try {
-            com.google.gson.Gson g = new com.google.gson.GsonBuilder().serializeNulls().create();
-            String json = g.toJson(f);
-            java.io.File tmp = new java.io.File(requireContext().getCacheDir(),
-                    "func_" + Long.toHexString(f.address) + ".json");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp)) {
-                fos.write(json.getBytes("UTF-8"));
+            FuncDetailData data = new FuncDetailData();
+            data.function = f;
+            data.symbols = elf.symtabEntries;
+            data.imports = elf.imports;
+            data.machine = elf.header != null ? elf.header.eMachine : 0;
+
+            String key = FuncDetailHost.put(data);
+            if (key == null) {
+                throw new RuntimeException("FuncDetailHost.put returned null");
             }
             Intent it = new Intent(requireContext(), FuncDetailActivity.class);
-            it.putExtra(FuncDetailActivity.EXTRA_JSON_PATH, tmp.getAbsolutePath());
+            it.putExtra(FuncDetailActivity.EXTRA_DATA_KEY, key);
             startActivity(it);
         } catch (Exception e) {
             android.widget.Toast.makeText(requireContext(),

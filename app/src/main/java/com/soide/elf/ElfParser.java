@@ -193,24 +193,21 @@ public class ElfParser {
     }
 
     private void parseSymbolTables() {
-        // 先扫一遍收集 strtab (.strtab / .dynstr) 备用
-        Map<String, SectionHeader> strtabs = new java.util.HashMap<>();
-        for (SectionHeader sh : elfFile.sectionHeaders) {
-            if (sh.shType == ElfConstants.SHT_STRTAB && sh.name != null) {
-                strtabs.put(sh.name, sh);
-            }
-        }
+        // 先预解析所有 strtab 候选（不依赖节区名，shstrtab 失败时仍能工作）
+        String dynstr = findDynstr();
 
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (sh.shType == ElfConstants.SHT_SYMTAB) {
                 // 符号表的字符串表: sh_link 指向 .strtab
-                String strtab = resolveStrtab(sh, strtabs);
+                String strtab = resolveStrtab(sh);
                 List<SymbolEntry> list = parseSymbols(sh, strtab);
                 elfFile.symtabEntries = list;
             } else if (sh.shType == ElfConstants.SHT_DYNSYM) {
                 // 动态符号表的字符串表: sh_link 指向 .dynstr
                 dynsymSec = sh;
-                String strtab = resolveStrtab(sh, strtabs);
+                // 优先 sh_link, 其次预先找到的 .dynstr
+                String strtab = resolveStrtab(sh);
+                if (strtab == null) strtab = dynstr;
                 dynsymForRel = parseSymbols(sh, strtab);
                 elfFile.dynsymEntries = dynsymForRel;
             }
@@ -218,30 +215,157 @@ public class ElfParser {
     }
 
     /**
-     * 通过 sh_link 找到符号表对应的字符串表。
-     * 优先用 sh_link；fallback 到按名字找 .strtab / .dynstr。
+     * 不依赖节区名（shstrtab 失败时仍能找到），
+     * 通过 sh_type 找出动态符号表可能使用的字符串表 (.dynstr)。
      */
-    private String resolveStrtab(SectionHeader symSh, Map<String, SectionHeader> strtabs) {
-        if (symSh.shLink > 0 && symSh.shLink < elfFile.sectionHeaders.size()) {
-            SectionHeader linked = elfFile.sectionHeaders.get(symSh.shLink);
-            if (linked != null && linked.shSize > 0) {
-                long sz = Math.min(linked.shSize, data.length - linked.shOffset);
-                if (sz > 0) {
-                    return readString(linked.shOffset, (int) sz);
+    private String findDynstr() {
+        // 1) 找 .dynsym，看它的 sh_link 指向谁
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.shType != ElfConstants.SHT_DYNSYM) continue;
+            String s = readSectionAsString(sh.shLink);
+            if (s != null && hasNonNullContent(s)) return s;
+        }
+        // 2) 找任何名为 .dynstr 的 SHT_STRTAB
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.shType == ElfConstants.SHT_STRTAB
+                    && ".dynstr".equals(sh.name)
+                    && sh.shSize > 0) {
+                String s = readSectionAsString(sh.shOffset, sh.shSize);
+                if (s != null) return s;
+            }
+        }
+        // 3) 找 DT_STRTAB (vaddr 指向 .dynstr 的运行时地址)
+        long dynstrVaddr = findDtStrtab();
+        if (dynstrVaddr != 0) {
+            // 把 vaddr 映射回文件偏移
+            for (ProgramHeader ph : elfFile.programHeaders) {
+                if (ph.pVaddr <= dynstrVaddr
+                        && dynstrVaddr < ph.pVaddr + ph.pFilesz) {
+                    long fileOff = ph.pOffset + (dynstrVaddr - ph.pVaddr);
+                    // .dynstr 在 loadable 段里能找到完整的字符串表（PT_LOAD 包含它）
+                    // 大小用整个段的文件大小
+                    String s = readSectionAsString(fileOff, ph.pFilesz - (fileOff - ph.pOffset));
+                    if (s != null && hasNonNullContent(s)) return s;
+                }
+            }
+            // 也可能落在某个 section 里
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shAddr <= dynstrVaddr
+                        && dynstrVaddr < sh.shAddr + sh.shSize
+                        && sh.shSize > 0) {
+                    String s = readSectionAsString(sh.shOffset, sh.shSize);
+                    if (s != null && hasNonNullContent(s)) return s;
                 }
             }
         }
-        // fallback: 按名字匹配
-        String wanted = ".strtab";
-        if (symSh.shType == ElfConstants.SHT_DYNSYM) wanted = ".dynstr";
-        SectionHeader sh = strtabs.get(wanted);
-        if (sh != null && sh.shSize > 0) {
-            long sz = Math.min(sh.shSize, data.length - sh.shOffset);
-            if (sz > 0) {
-                return readString(sh.shOffset, (int) sz);
+        return null;
+    }
+
+    /** 返回 .dynstr 的虚拟地址 (DT_STRTAB) */
+    private long findDtStrtab() {
+        SectionHeader dynamicSec = null;
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.shType == ElfConstants.SHT_DYNAMIC) {
+                dynamicSec = sh; break;
+            }
+        }
+        if (dynamicSec == null) {
+            for (ProgramHeader ph : elfFile.programHeaders) {
+                if (ph.pType == ElfConstants.PT_DYNAMIC) {
+                    dynamicSec = new SectionHeader();
+                    dynamicSec.shOffset = ph.pOffset;
+                    dynamicSec.shSize = ph.pFilesz;
+                    break;
+                }
+            }
+        }
+        if (dynamicSec == null) return 0;
+        int entrySize = is64Bit ? 16 : 8;
+        for (long off = dynamicSec.shOffset;
+             off + entrySize <= dynamicSec.shOffset + dynamicSec.shSize;
+             off += entrySize) {
+            ByteBuffer buf = ByteBuffer.wrap(data).order(byteOrder);
+            buf.position((int) off);
+            long dTag, dVal;
+            if (is64Bit) { dTag = buf.getLong(); dVal = buf.getLong(); }
+            else { dTag = buf.getInt() & 0xffffffffL; dVal = buf.getInt() & 0xffffffffL; }
+            if (dTag == 0) break;
+            if (dTag == ElfConstants.DT_STRTAB) return dVal;
+        }
+        return 0;
+    }
+
+    /** 通过 sh_link 找到符号表对应的字符串表。多重 fallback。 */
+    private String resolveStrtab(SectionHeader symSh) {
+        // 1) sh_link 直接对应的 section
+        if (symSh.shLink > 0 && symSh.shLink < elfFile.sectionHeaders.size()) {
+            SectionHeader linked = elfFile.sectionHeaders.get(symSh.shLink);
+            String s = readSectionAsString(linked.shOffset, linked.shSize);
+            if (s != null && hasNonNullContent(s)) return s;
+        }
+        // 2) 按名字 (如果 shstrtab 还能用)
+        if (symSh.shType == ElfConstants.SHT_DYNSYM) {
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shType == ElfConstants.SHT_STRTAB
+                        && ".dynstr".equals(sh.name) && sh.shSize > 0) {
+                    String s = readSectionAsString(sh.shOffset, sh.shSize);
+                    if (s != null) return s;
+                }
+            }
+            // 3) 任何 SHT_STRTAB 节区都试试 (兜底)
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shType == ElfConstants.SHT_STRTAB && sh.shSize > 0
+                        && (sh.name == null || !sh.name.isEmpty())) {
+                    String s = readSectionAsString(sh.shOffset, sh.shSize);
+                    if (s != null && hasNonNullContent(s)) return s;
+                }
+            }
+        } else {
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shType == ElfConstants.SHT_STRTAB
+                        && ".strtab".equals(sh.name) && sh.shSize > 0) {
+                    String s = readSectionAsString(sh.shOffset, sh.shSize);
+                    if (s != null) return s;
+                }
+            }
+            // 3) 任何 SHT_STRTAB 节区都试试 (兜底)
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shType == ElfConstants.SHT_STRTAB && sh.shSize > 0) {
+                    String s = readSectionAsString(sh.shOffset, sh.shSize);
+                    if (s != null && hasNonNullContent(s)) return s;
+                }
             }
         }
         return null;
+    }
+
+    private String readSectionAsString(int secIdx) {
+        if (secIdx <= 0 || secIdx >= elfFile.sectionHeaders.size()) return null;
+        SectionHeader sh = elfFile.sectionHeaders.get(secIdx);
+        return readSectionAsString(sh.shOffset, sh.shSize);
+    }
+
+    private String readSectionAsString(long offset, long size) {
+        if (size <= 0 || offset < 0) return null;
+        if (offset >= data.length) return null;
+        long avail = data.length - offset;
+        int len = (int) Math.min(size, avail);
+        if (len <= 0) return null;
+        try {
+            return new String(data, (int) offset, len, java.nio.charset.StandardCharsets.ISO_8859_1);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 检查字符串表是否含有非空内容（去除首字节 null） */
+    private static boolean hasNonNullContent(String s) {
+        if (s == null || s.length() < 2) return false;
+        // strtab 至少应该有一个非 null 字符
+        for (int i = 1; i < Math.min(s.length(), 64); i++) {
+            if (s.charAt(i) != '\0') return true;
+        }
+        return false;
     }
 
     private List<SymbolEntry> parseSymbols(SectionHeader sh, String strtab) {
@@ -527,9 +651,10 @@ public class ElfParser {
      * 同时通过 {@link LinearSweepAnalyzer} 在可执行节区上做线性扫描，发现额外函数。
      * 对 ARM32 自动识别 Thumb 模式。
      * <p>
-     * v1.4.1 改进：
-     * - 允许 size=0 的函数（用默认 32 字节做反汇编）
-     * - 未命名的 FUNC 符号自动生成 sub_xxx 名称
+     * v1.4.2 改进：
+     * - 不再过滤 __ 前缀的符号名（参考 C++ 实现），函数列表完整呈现
+     * - 线性扫描合并改为累积模式（之前 all 被每次循环结果覆盖）
+     * - 函数名缺失时自动生成 sub_xxx
      */
     private void parseFunctions() {
         List<FunctionInfo> symtabFuncs = new ArrayList<>();
@@ -544,8 +669,8 @@ public class ElfParser {
             if (se.stValue == 0) continue; // 跳过无地址符号
             if (se.name != null) {
                 if (se.name.isEmpty()) se.name = null;
-                else if (se.name.startsWith("$")) continue; // 跳过编译器内部符号
-                else if (se.name.startsWith("__")) continue; // 跳过程序集辅助符号
+                // 仅跳过编译器内部临时符号 ($a, $d 等)，不再过滤 __
+                else if (se.name.startsWith("$")) continue;
             }
 
             // 找到所属节区（符号地址落在 [shAddr, shAddr+shSize) 范围）
@@ -612,7 +737,7 @@ public class ElfParser {
             symtabFuncs.add(fi);
         }
 
-        // 合并线性扫描结果
+        // 合并线性扫描结果 (v1.4.2 修复: 改为累积模式)
         List<FunctionInfo> all = new ArrayList<>(symtabFuncs);
         if (elfFile.header.eMachine == ElfConstants.EM_ARM
                 || elfFile.header.eMachine == ElfConstants.EM_AARCH64
@@ -621,18 +746,34 @@ public class ElfParser {
             for (SectionHeader sh : elfFile.sectionHeaders) {
                 if (sh.shType != ElfConstants.SHT_PROGBITS) continue;
                 if (sh.shSize < 8) continue;
-                // 只在 .text 之类可执行节区上扫描
+                // 在可执行节区上扫描:
+                //   - 有名字时要求是 .text/.plt/.init/.fini
+                //   - 名字为空时退而求其次: SHF_EXECINSTR 标志位
                 String name = sh.name != null ? sh.name : "";
-                if (!(name.contains("text") || name.contains("plt") || name.contains("init")
-                        || name.contains("fini"))) continue;
-                if ((int) sh.shOffset + (int) sh.shSize > data.length) continue;
+                boolean looksExec = (sh.shFlags & ElfConstants.SHF_EXECINSTR) != 0;
+                boolean nameExec = name.contains("text")
+                        || name.contains("plt")
+                        || name.contains("init")
+                        || name.contains("fini");
+                if (!looksExec && !nameExec) continue;
+                if (sh.shOffset + sh.shSize > data.length) continue;
 
                 // 重置 disasm 到 ARM 模式
                 disasm.setThumb(false);
                 List<Long> hits = LinearSweepAnalyzer.scan(sh, data,
                         elfFile.header.eMachine, is64Bit);
-                all = LinearSweepAnalyzer.mergeWithSymbols(symtabFuncs, hits, sh, disasm,
+                // 累积合并: 取已有地址集合，逐节区追加新发现的函数
+                List<FunctionInfo> sectionFns = LinearSweepAnalyzer.mergeWithSymbols(
+                        new ArrayList<>(all), hits, sh, disasm,
                         elfFile.header.eMachine, data);
+                // 只把 new (非 symtab) 的加进来，避免覆盖符号表的条目
+                java.util.Set<Long> known = new java.util.HashSet<>();
+                for (FunctionInfo f : all) known.add(f.address);
+                for (FunctionInfo f : sectionFns) {
+                    if (known.add(f.address)) {
+                        all.add(f);
+                    }
+                }
             }
         }
 

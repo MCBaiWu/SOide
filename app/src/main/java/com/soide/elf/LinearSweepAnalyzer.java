@@ -1,163 +1,160 @@
 package com.soide.elf;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.TreeSet;
 
 /**
- * 线性扫描 (Linear Sweep) 函数边界探测器。
- *
- * 通过识别常见架构的函数序言 (prologue) 字节特征来发现 .symtab/.dynsym
- * 之外的"隐式"函数入口。识别是启发式的，结果可能包含误报。
+ * 线性扫描 + 序言模式匹配：在可执行节区上识别函数入口。
+ * 参考 C++ 实现 ARM64_PROLOGUE_PATTERNS / THUMB_PUSH 模式。
  */
 public class LinearSweepAnalyzer {
 
     public static final int SOURCE_SYMTAB = 0;
     public static final int SOURCE_LINEARSWEEP = 1;
 
-    private LinearSweepAnalyzer() {}
+    // ARM64 典型函数序言 4 字节模式 (stp x29, x30, [sp, #imm]! + mov x29, sp + paciasp 等)
+    private static final byte[][] ARM64_PROLOGUES = {
+            {(byte) 0xFD, (byte) 0x7B, (byte) 0xBF, (byte) 0xA9}, // stp x29, x30, [sp, #-X]!
+            {(byte) 0xFD, (byte) 0x7B, (byte) 0x01, (byte) 0xA9}, // stp x29, x30, [sp, #imm]
+            {(byte) 0xF3, (byte) 0x53, (byte) 0xBF, (byte) 0xA9}, // stp x19, x30, [sp, #-X]!
+            {(byte) 0xFF, (byte) 0xC3, (byte) 0x00, (byte) 0xD1}, // sub sp, sp, #0x...
+            {(byte) 0xFD, (byte) 0x7B, (byte) 0xBF, (byte) 0xB9}, // ldp 还原 frame
+            {(byte) 0xFD, (byte) 0x7B, (byte) 0x01, (byte) 0xB9},
+            {(byte) 0xBF, (byte) 0x23, (byte) 0x03, (byte) 0xD5}, // paciasp
+            {(byte) 0x9F, (byte) 0x24, (byte) 0x03, (byte) 0xD5}, // pacibsp
+            {(byte) 0xBF, (byte) 0x24, (byte) 0x03, (byte) 0xD5}, // autiasp
+    };
+
+    // ARM32 Thumb push {reg_list, lr} 范围 0xB500-0xB5FF
+    // (push {r7, lr} = 0xB5F0, push {r4, lr} = 0xB510, ...)
+    private static final int THUMB_PUSH_MIN = 0xB500;
+    private static final int THUMB_PUSH_MAX = 0xB5FF;
+
+    // Thumb 常见 prologue 前缀: push + mov r7, sp / add r7, sp, #imm
+    private static final int[] THUMB_MOV_R7_SP = {0x466F, 0x44AF}; // mov r7, sp / add r7, sp, #imm
 
     /**
-     * 对一个可执行节区进行线性扫描，返回候选函数入口地址列表 (相对节区起点的偏移)。
+     * 在单个节区上扫描函数入口。
      */
-    public static List<Long> scan(SectionHeader sec, byte[] data, int elfMachine, boolean is64Bit) {
+    public static List<Long> scan(SectionHeader sh, byte[] data, int machine, boolean is64) {
         List<Long> hits = new ArrayList<>();
-        if (sec == null || sec.shSize < 4) return hits;
-        int len = (int) Math.min(sec.shSize, data.length - (int) sec.shOffset);
-        if (len <= 0) return hits;
-        int start = (int) sec.shOffset;
-        int end = start + len;
+        if (sh == null || sh.shOffset + sh.shSize > data.length) return hits;
 
-        switch (elfMachine) {
-            case ElfConstants.EM_ARM:
-                scanArm(sec, data, start, end, hits);
-                break;
-            case ElfConstants.EM_AARCH64:
-                scanAarch64(sec, data, start, end, hits);
-                break;
-            case ElfConstants.EM_386:
-                scanX86(sec, data, start, end, false, hits);
-                break;
-            case ElfConstants.EM_X86_64:
-                scanX86(sec, data, start, end, true, hits);
-                break;
+        int off0 = (int) sh.shOffset;
+        int sz = (int) sh.shSize;
+
+        if (machine == ElfConstants.EM_AARCH64) {
+            for (int off = 0; off + 4 <= sz; off += 4) {
+                long addr = sh.shAddr + off;
+                if ((addr & 3) != 0) continue;
+                if (matchesAny(data, off0 + off, ARM64_PROLOGUES)) {
+                    hits.add(addr);
+                }
+            }
+        } else if (machine == ElfConstants.EM_ARM) {
+            for (int off = 0; off + 4 <= sz; off += 2) {
+                long addr = sh.shAddr + off;
+                if (off0 + off + 2 > data.length) break;
+                int hw = (data[off0 + off] & 0xff) | ((data[off0 + off + 1] & 0xff) << 8);
+                if (hw >= THUMB_PUSH_MIN && hw <= THUMB_PUSH_MAX) {
+                    // 进一步看后面是不是 mov r7, sp (强化识别)
+                    if (off + 4 <= sz && off0 + off + 4 <= data.length) {
+                        int hw2 = (data[off0 + off + 2] & 0xff) | ((data[off0 + off + 3] & 0xff) << 8);
+                        if (hw2 == THUMB_MOV_R7_SP[0] || hw2 == THUMB_MOV_R7_SP[1]) {
+                            hits.add(addr);
+                            continue;
+                        }
+                    }
+                    // 没有 mov r7, sp 但有 push {reg, lr} 也算
+                    // 强制 LR 在 push 列表里: PUSH 指令编码 bit 8 set
+                    if ((hw & 0x100) != 0) {
+                        hits.add(addr);
+                    }
+                }
+            }
+        } else if (machine == ElfConstants.EM_386 || machine == ElfConstants.EM_X86_64) {
+            // x86 函数序言: 0x55 (push ebp/rbp) 在可执行节区出现
+            for (int off = 0; off + 1 < sz; off++) {
+                if (data[off0 + off] == (byte) 0x55) {
+                    long addr = sh.shAddr + off;
+                    hits.add(addr);
+                }
+            }
         }
         return hits;
     }
 
-    /**
-     * ARM 模式：识别 push {...lr} / push {r.., lr} 模式 (A1 encoding: 0xe92d????)
-     * Thumb 模式：识别 PUSH {...} (0xb5??)
-     * 经验做法是直接扫描所有 4 字节 ARM prologue 与 2 字节 Thumb prologue。
-     */
-    private static void scanArm(SectionHeader sec, byte[] data, int start, int end, List<Long> hits) {
-        // 1) ARM 4 字节 prologue 0xe92d???? (push)
-        for (int i = start; i + 4 <= end; i += 4) {
-            if ((data[i] & 0xff) == 0x2d && (data[i + 1] & 0xff) == 0xe9) {
-                hits.add((long) (i - start));
+    private static boolean matchesAny(byte[] data, int off, byte[][] patterns) {
+        if (off + 4 > data.length) return false;
+        for (byte[] pat : patterns) {
+            if (data[off] == pat[0] && data[off + 1] == pat[1]
+                    && data[off + 2] == pat[2] && data[off + 3] == pat[3]) {
+                return true;
             }
         }
-        // 2) Thumb 2 字节 push 0xb5?? (low 8-bit: 0xb500 ~ 0xb5ff)
-        for (int i = start; i + 2 <= end; i += 2) {
-            if ((data[i] & 0xff) == 0xb5) {
-                hits.add((long) (i - start));
-            }
-        }
+        return false;
     }
 
     /**
-     * AArch64 模式：识别 stp x29, x30, [sp, #imm]! (0xa9bf7bfd/0xa9bc7bfd/...)
-     * 这通常是函数序言。
+     * 合并符号表函数和扫描找到的函数。
+     * 优先用符号表里的（带名字），再补充扫描到的。
      */
-    private static void scanAarch64(SectionHeader sec, byte[] data, int start, int end, List<Long> hits) {
-        // little-endian: bytes 0..3 contain the 32-bit instruction
-        for (int i = start; i + 4 <= end; i += 4) {
-            int insn = (data[i] & 0xff) | ((data[i + 1] & 0xff) << 8)
-                    | ((data[i + 2] & 0xff) << 16) | ((data[i + 3] & 0xff) << 24);
-            // stp x29, x30, [sp, #imm]!
-            // 1010 1001 1??1 1101 1111 1000 1011 1101 (简化匹配: 高位 0xa9b?7bfd)
-            if ((insn & 0xffe003e0) == 0xa9a07be0) {
-                hits.add((long) (i - start));
-            }
-        }
-    }
+    public static List<FunctionInfo> mergeWithSymbols(List<FunctionInfo> symFuncs,
+                                                      List<Long> scanned,
+                                                      SectionHeader sh,
+                                                      Disassembler disasm,
+                                                      int machine,
+                                                      byte[] data) {
+        Set<Long> known = new HashSet<>();
+        for (FunctionInfo f : symFuncs) known.add(f.address);
 
-    /**
-     * x86/x64 模式：识别常见函数序言 0x55 (push rbp) 0x48 0x89 0xe5 (mov rbp, rsp)
-     */
-    private static void scanX86(SectionHeader sec, byte[] data, int start, int end, boolean is64, List<Long> hits) {
-        for (int i = start; i + 4 < end; i++) {
-            if ((data[i] & 0xff) == 0x55) {
-                if (is64) {
-                    // 48 89 e5 = mov rbp, rsp
-                    if (i + 4 < end && (data[i + 1] & 0xff) == 0x48
-                            && (data[i + 2] & 0xff) == 0x89
-                            && (data[i + 3] & 0xff) == 0xe5) {
-                        hits.add((long) (i - start));
-                    }
-                } else {
-                    // 89 e5 = mov ebp, esp
-                    if (i + 3 < end && (data[i + 1] & 0xff) == 0x89
-                            && (data[i + 2] & 0xff) == 0xe5) {
-                        hits.add((long) (i - start));
-                    }
-                }
-            }
-        }
-    }
+        List<FunctionInfo> out = new ArrayList<>(symFuncs);
+        if (sh == null || sh.shSize < 4) return out;
+        long fileOff = sh.shOffset;
+        long fileEnd = sh.shOffset + sh.shSize;
+        if (fileEnd > data.length) fileEnd = data.length;
 
-    /**
-     * 给定若干扫描结果（相对节区起点的偏移），过滤掉与已知 symtab 函数入口地址 (相对节区起点) 重复的项。
-     * 返回合并后的 (offset, source) 列表，offset 单位为节区起点。
-     */
-    public static List<FunctionInfo> mergeWithSymbols(List<FunctionInfo> symtabFuncs,
-                                                       List<Long> sweepHits,
-                                                       SectionHeader sec,
-                                                       Disassembler disasm,
-                                                       int machineType,
-                                                       byte[] data) {
-        Set<String> symKeys = new TreeSet<>();
-        for (FunctionInfo f : symtabFuncs) {
-            if (sec.shAddr > 0 && f.address >= sec.shAddr) {
-                long off = f.address - sec.shAddr;
-                symKeys.add(off + "@" + sec.shName);
-            }
-        }
+        for (Long addr : scanned) {
+            if (known.contains(addr)) continue;
+            long size = estimateSize(addr, sh, scanned, machine);
+            long end = Math.min(addr + size, sh.shAddr + sh.shSize);
+            long readOff = fileOff + (addr - sh.shAddr);
+            if (readOff < fileOff) continue;
+            int readLen = (int) Math.min(size, fileEnd - readOff);
+            if (readLen <= 0) continue;
 
-        List<FunctionInfo> result = new ArrayList<>(symtabFuncs);
-        for (Long off : sweepHits) {
-            String key = off + "@" + sec.shName;
-            if (symKeys.contains(key)) continue;
-            symKeys.add(key);
+            byte[] code = Arrays.copyOfRange(data, (int) readOff, (int) (readOff + readLen));
 
-            long addr = sec.shAddr + off;
-            // 限定函数大小为下一个函数或节区末尾
-            long nextAddr = sec.shAddr + sec.shSize;
-            for (FunctionInfo f : symtabFuncs) {
-                if (f.address > addr && f.address < nextAddr) nextAddr = f.address;
-            }
-            long size = Math.min(nextAddr - addr, 4 * 1024);
-            if (size <= 0) continue;
+            boolean thumb = (machine == ElfConstants.EM_ARM && (addr & 1L) == 1L);
+            disasm.setThumb(thumb);
+            List<DisassembledInstruction> insns = disasm.disassemble(code, addr & ~1L);
 
-            long fileOff = sec.shOffset + off;
-            if (fileOff < 0 || fileOff + size > data.length) continue;
-
-            byte[] code = new byte[(int) size];
-            System.arraycopy(data, (int) fileOff, code, 0, (int) size);
-
-            // 对 ARM 重新探测 thumb 模式
-            if (machineType == ElfConstants.EM_ARM) {
-                disasm.setThumb(Disassembler.looksLikeThumb(code));
-            }
-
-            List<DisassembledInstruction> insns = disasm.disassemble(code, addr);
-            FunctionInfo fi = new FunctionInfo("sub_" + Long.toHexString(addr), addr, size, sec.name);
+            FunctionInfo fi = new FunctionInfo(
+                    "sub_" + Long.toHexString(addr & ~1L),
+                    addr & ~1L, size, sh.name != null ? sh.name : "");
             fi.instructions = insns;
+            fi.isThumb = thumb;
             fi.source = SOURCE_LINEARSWEEP;
-            fi.isThumb = Disassembler.looksLikeThumb(code);
-            result.add(fi);
+            out.add(fi);
+            known.add(addr);
         }
-        return result;
+        return out;
+    }
+
+    /**
+     * 估算函数大小：到下一个扫描到的函数为止；最多 4KB。
+     */
+    private static long estimateSize(long addr, SectionHeader sh, List<Long> scanned, int machine) {
+        long minDelta = 4 * 1024L;
+        for (Long a : scanned) {
+            if (a <= addr) continue;
+            long d = a - addr;
+            if (d < minDelta) minDelta = d;
+        }
+        if (minDelta > 4096) minDelta = 4096;
+        return minDelta;
     }
 }

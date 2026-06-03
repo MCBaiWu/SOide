@@ -43,6 +43,11 @@ public final class ElfConstants {
     public static final int SHT_REL = 9;
     public static final int SHT_DYNSYM = 11;
 
+    // ----- 节区标志 (sh_flags) -----
+    public static final long SHF_WRITE = 0x1;
+    public static final long SHF_ALLOC = 0x2;
+    public static final long SHF_EXECINSTR = 0x4;
+
     // ----- 段类型 (p_type) -----
     public static final int PT_NULL = 0;
     public static final int PT_LOAD = 1;
