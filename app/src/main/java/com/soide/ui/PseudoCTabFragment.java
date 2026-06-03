@@ -13,8 +13,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.soide.R;
-import com.soide.elf.pseudoc.PseudoCContext;
 import com.soide.elf.pseudoc.PseudoCConverter;
+import com.soide.elf.pseudoc.PseudoCConverter.PseudoCContext;
 import com.soide.elf.pseudoc.PseudoCRegistry;
 
 import java.util.HashMap;
