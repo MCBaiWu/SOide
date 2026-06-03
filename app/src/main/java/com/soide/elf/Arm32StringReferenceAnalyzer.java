@@ -64,7 +64,7 @@ public class Arm32StringReferenceAnalyzer extends StringReferenceAnalyzer {
             int hash = inside.indexOf('#');
             if (hash >= 0) imm = extractHexValue(inside.substring(hash + 1));
             // PC 值：ARM 模式 +8，Thumb 模式 +4
-            long pc = func.isThumb() ? (ins.address & ~1L) + 4 : ins.address + 8;
+            long pc = func.isThumb ? (ins.address & ~1L) + 4 : ins.address + 8;
             long poolAddr = (pc + imm) & ~3L;
             long fileOff = vaddrToFileOffset(poolAddr);
             if (fileOff < 0 || fileOff + 4 > fileData.length) continue;

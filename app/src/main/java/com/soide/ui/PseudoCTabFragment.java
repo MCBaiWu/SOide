@@ -81,7 +81,10 @@ public class PseudoCTabFragment extends Fragment {
         // tvCount 已存在，我们把它转成 "复制全部" 按钮
         tvCount.setClickable(true);
         tvCount.setFocusable(true);
-        tvCount.setBackground(android.graphics.drawable.ripple.ColorDrawable());
+        // ripple: ?attr/selectableItemBackground
+        android.util.TypedValue tvRipple = new android.util.TypedValue();
+        requireContext().getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tvRipple, true);
+        if (tvRipple.resourceId != 0) tvCount.setForeground(requireContext().getDrawable(tvRipple.resourceId));
         tvCount.setTextColor(ThemeUtils.colorPrimary(requireContext()));
         tvCount.setOnClickListener(v -> {
             // 复制全部伪 C
@@ -145,7 +148,10 @@ public class PseudoCTabFragment extends Fragment {
             tv.setTypeface(android.graphics.Typeface.MONOSPACE);
             tv.setPadding(dp(parent, 14), dp(parent, 6), dp(parent, 14), dp(parent, 6));
             tv.setTextIsSelectable(true);
-            tv.setBackground(android.graphics.drawable.ripple.ColorDrawable());
+            // ripple: ?attr/selectableItemBackground
+            android.util.TypedValue tvRipple = new android.util.TypedValue();
+            parent.getContext().getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tvRipple, true);
+            if (tvRipple.resourceId != 0) tv.setForeground(parent.getContext().getDrawable(tvRipple.resourceId));
             tv.setClickable(true);
             tv.setFocusable(true);
             return new VH(tv);

@@ -80,7 +80,10 @@ public class FuncDetailActivity extends AppCompatActivity {
                 case 1: return ControlFlowTabFragment.newInstance(data);
                 case 2: return PseudoCTabFragment.newInstance(data);
                 case 3: return XRefTabFragment.newInstance(data);
-                default: return AsmTabFragment.newInstance(data);
+                default: return AsmTabFragment.newInstance(
+                        data != null && data.function != null
+                                ? data.function.instructions
+                                : java.util.Collections.<com.soide.elf.DisassembledInstruction>emptyList());
             }
         }
 

@@ -59,7 +59,10 @@ public class AsmAdapter extends RecyclerView.Adapter<AsmAdapter.VH> {
         // 整行可点击 / 长按
         root.setClickable(true);
         root.setFocusable(true);
-        root.setForeground(android.graphics.drawable.ripple.ColorDrawable());
+        // ripple effect: 用 ?attr/selectableItemBackground 等价
+        android.util.TypedValue tv = new android.util.TypedValue();
+        ctx.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true);
+        if (tv.resourceId != 0) root.setForeground(ctx.getDrawable(tv.resourceId));
 
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -199,12 +202,12 @@ public class AsmAdapter extends RecyclerView.Adapter<AsmAdapter.VH> {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(40, 0, 40, 0);
-        b.setView(input, lp);
+        input.setLayoutParams(lp);
         // 同时设置到 dialog 内容
         LinearLayout wrap = new LinearLayout(ctx);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.addView(info);
-        wrap.addView(input, lp);
+        wrap.addView(input);
         b.setView(wrap);
 
         b.setPositiveButton("验证 (keystone)", (d, w) -> {
@@ -214,7 +217,7 @@ public class AsmAdapter extends RecyclerView.Adapter<AsmAdapter.VH> {
                 // 用 keystone 验证是否合法
                 String mn = ins.mnemonic == null ? "" : ins.mnemonic;
                 String op = ins.opStr == null ? "" : ins.opStr;
-                Assembler.Result res = Assembler.assemble(mn + " " + op, 0L);
+                Assembler.Result res = Assembler.assemble(mn + " " + op, 0);
                 if (res != null && res.ok) {
                     StringBuilder sb = new StringBuilder("keystone 反汇编预期机器码: ");
                     if (res.bytes != null) {

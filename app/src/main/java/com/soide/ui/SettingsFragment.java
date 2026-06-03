@@ -375,7 +375,10 @@ public class SettingsFragment extends Fragment {
         lp.topMargin = dp(6);
         row.setLayoutParams(lp);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setBackground(android.graphics.drawable.ripple.ColorDrawable()); // 点击水波
+        // 点击水波
+        android.util.TypedValue tvRipple = new android.util.TypedValue();
+        ctx.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tvRipple, true);
+        if (tvRipple.resourceId != 0) row.setForeground(ctx.getDrawable(tvRipple.resourceId));
         row.setClickable(true);
         row.setFocusable(true);
         row.setOnClickListener(v -> {
