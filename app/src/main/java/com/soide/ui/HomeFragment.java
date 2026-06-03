@@ -83,7 +83,7 @@ public class HomeFragment extends Fragment {
             sectionTitle.setLayoutParams(stLp);
             content.addView(sectionTitle);
 
-            // === 4 张功能卡 ===
+            // === 5 张功能卡 ===
             content.addView(buildFeatureCard(ctx,
                     R.drawable.ic_parse,
                     "SO 解析",
@@ -116,9 +116,17 @@ public class HomeFragment extends Fragment {
                     Color.parseColor("#FFFFDAD6"),
                     MainActivity.TAB_ASSEMBLER));
 
+            content.addView(buildFeatureCard(ctx,
+                    R.drawable.ic_history,
+                    "历史记录",
+                    "查看最近解析过的 SO 文件列表，一键重新打开",
+                    Color.parseColor("#FF006A60"),
+                    Color.parseColor("#FFCDEBE7"),
+                    MainActivity.TAB_HISTORY));
+
             // === 底部小提示 ===
             TextView footer = new TextView(ctx);
-            footer.setText("底部导航可切换全部 6 个功能  ·  反汇编使用 capstone 真库");
+            footer.setText("底部导航 · 反汇编 capstone 真库 · 汇编 keystone 真库");
             footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             footer.setTextColor(Color.parseColor("#FF74777F"));
             footer.setGravity(Gravity.CENTER);
