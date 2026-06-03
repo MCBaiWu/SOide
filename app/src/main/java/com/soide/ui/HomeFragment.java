@@ -124,6 +124,14 @@ public class HomeFragment extends Fragment {
                     Color.parseColor("#FFCDEBE7"),
                     MainActivity.TAB_HISTORY));
 
+            content.addView(buildFeatureCard(ctx,
+                    R.drawable.ic_settings,
+                    "设置",
+                    "切换白天 / 黑夜主题，查看 App 信息",
+                    Color.parseColor("#FF535F70"),
+                    Color.parseColor("#FFD7E3F7"),
+                    MainActivity.TAB_SETTINGS));
+
             // === 底部小提示 ===
             TextView footer = new TextView(ctx);
             footer.setText("底部导航 · 反汇编 capstone 真库 · 汇编 keystone 真库");

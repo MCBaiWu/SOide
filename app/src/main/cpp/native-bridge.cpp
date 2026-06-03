@@ -23,10 +23,44 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 // ---------------------------------------------------------------
-// JNI: nativeDisasm
-//   输入 byte[], 返回 Object[] 数组，每项 Object[] = { address:long, size:int,
-//     bytes:byte[], mnemonic:String, opStr:String }
+// 把 ndk_insn_t[] 数组打包成 Java 端的 jobjectArray，
+// 每行是 Object[5] = { address:Long, size:Integer, bytes:byte[],
+//                       mnemonic:String, opStr:String }
 // ---------------------------------------------------------------
+static jobjectArray buildDisasmResult(JNIEnv* env, int n, const ndk_insn_t* insns) {
+    if (n < 0) n = 0;
+    jclass objClass   = env->FindClass("java/lang/Object");
+    jclass longClass  = env->FindClass("java/lang/Long");
+    jclass intClass   = env->FindClass("java/lang/Integer");
+    jmethodID longInit = env->GetMethodID(longClass, "<init>", "(J)V");
+    jmethodID intInit  = env->GetMethodID(intClass,  "<init>", "(I)V");
+
+    jobjectArray result = env->NewObjectArray((jsize) n, objClass, nullptr);
+    for (int i = 0; i < n; i++) {
+        const ndk_insn_t& ins = insns[i];
+        int bsz = (int) ins.size;
+        if (bsz < 0) bsz = 0;
+        if (bsz > 8) bsz = 8;
+        jbyteArray jbytes = env->NewByteArray(bsz);
+        jbyte buf[8];
+        for (int k = 0; k < bsz; k++) buf[k] = (jbyte) (ins.bytes[k] & 0xff);
+        env->SetByteArrayRegion(jbytes, 0, bsz, buf);
+
+        jstring jmn = env->NewStringUTF(ins.mnemonic);
+        jstring jop = env->NewStringUTF(ins.op_str);
+
+        jobjectArray row = env->NewObjectArray(5, objClass, nullptr);
+        env->SetObjectArrayElement(row, 0, env->NewObject(longClass, longInit, (jlong) ins.address));
+        env->SetObjectArrayElement(row, 1, env->NewObject(intClass,  intInit,  (jint)  ins.size));
+        env->SetObjectArrayElement(row, 2, jbytes);
+        env->SetObjectArrayElement(row, 3, jmn);
+        env->SetObjectArrayElement(row, 4, jop);
+
+        env->SetObjectArrayElement(result, i, row);
+    }
+    return result;
+}
+
 static jlongArray toLongArray(JNIEnv* env, const std::vector<uint64_t>& v) {
     jlongArray arr = env->NewLongArray((jsize) v.size());
     if (!arr) return nullptr;
@@ -49,45 +83,28 @@ Java_com_soide_nativebridge_NativeBridge_nativeDisasm(
                            insns.data(), (int) insns.size());
     env->ReleaseByteArrayElements(code, bytes, JNI_ABORT);
 
-    if (n < 0) n = 0;
-    if (n > (int) insns.size()) n = (int) insns.size();
+    return buildDisasmResult(env, n, insns.data());
+}
 
-    jclass arrClass = env->FindClass("[Ljava/lang/Object;");
-    jclass objClass = env->FindClass("java/lang/Object");
-    jclass strClass = env->FindClass("java/lang/String");
-    jclass byteArrClass = env->FindClass("[B");
-    jclass longClass = env->FindClass("java/lang/Long");
-    jclass intClass = env->FindClass("java/lang/Integer");
-    jmethodID longInit = env->GetMethodID(longClass, "<init>", "(J)V");
-    jmethodID intInit = env->GetMethodID(intClass, "<init>", "(I)V");
+// ---------------------------------------------------------------
+// JNI: nativeDisasm64 - AArch64 (ARM64) 反汇编
+// ---------------------------------------------------------------
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_soide_nativebridge_NativeBridge_nativeDisasm64(
+        JNIEnv* env, jclass /*clazz*/,
+        jbyteArray code, jlong address) {
 
-    jobjectArray result = env->NewObjectArray((jsize) n, objClass, nullptr);
+    jsize len = env->GetArrayLength(code);
+    jbyte* bytes = env->GetByteArrayElements(code, nullptr);
+    if (!bytes) return nullptr;
 
-    for (int i = 0; i < n; i++) {
-        const ndk_insn_t& ins = insns[i];
-        // 构造 byte[] bytes
-        int bsz = (int) ins.size;
-        if (bsz < 0) bsz = 0;
-        if (bsz > 8) bsz = 8;
-        jbyteArray jbytes = env->NewByteArray(bsz);
-        jbyte buf[8];
-        for (int k = 0; k < bsz; k++) buf[k] = (jbyte) (ins.bytes[k] & 0xff);
-        env->SetByteArrayRegion(jbytes, 0, bsz, buf);
+    std::vector<ndk_insn_t> insns(2048);
+    int n = ndk_disasm_arm64(reinterpret_cast<const uint8_t*>(bytes), (size_t) len,
+                             (uint64_t) address,
+                             insns.data(), (int) insns.size());
+    env->ReleaseByteArrayElements(code, bytes, JNI_ABORT);
 
-        jstring jmn = env->NewStringUTF(ins.mnemonic);
-        jstring jop = env->NewStringUTF(ins.op_str);
-
-        // Object[] = { address, size, bytes, mnemonic, opStr }
-        jobjectArray row = env->NewObjectArray(5, objClass, nullptr);
-        env->SetObjectArrayElement(row, 0, env->NewObject(longClass, longInit, (jlong) ins.address));
-        env->SetObjectArrayElement(row, 1, env->NewObject(intClass, intInit, (jint) ins.size));
-        env->SetObjectArrayElement(row, 2, jbytes);
-        env->SetObjectArrayElement(row, 3, jmn);
-        env->SetObjectArrayElement(row, 4, jop);
-
-        env->SetObjectArrayElement(result, i, row);
-    }
-    return result;
+    return buildDisasmResult(env, n, insns.data());
 }
 
 // ---------------------------------------------------------------
@@ -108,6 +125,30 @@ Java_com_soide_nativebridge_NativeBridge_nativeAssemble(
 
     if (n <= 0) {
         // 失败 -> 返回空数组
+        jbyteArray empty = env->NewByteArray(0);
+        return empty;
+    }
+    jbyteArray result = env->NewByteArray(n);
+    env->SetByteArrayRegion(result, 0, n, (const jbyte*) out);
+    return result;
+}
+
+// ---------------------------------------------------------------
+// JNI: nativeAssemble64 - AArch64 (ARM64) 汇编
+// ---------------------------------------------------------------
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_soide_nativebridge_NativeBridge_nativeAssemble64(
+        JNIEnv* env, jclass /*clazz*/,
+        jstring line) {
+
+    const char* cstr = env->GetStringUTFChars(line, nullptr);
+    if (!cstr) return nullptr;
+
+    uint8_t out[8] = {0};
+    int n = ndk_asm_arm64(cstr, out, (int) sizeof(out));
+    env->ReleaseStringUTFChars(line, cstr);
+
+    if (n <= 0) {
         jbyteArray empty = env->NewByteArray(0);
         return empty;
     }

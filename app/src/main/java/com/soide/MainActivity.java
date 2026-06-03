@@ -42,6 +42,7 @@ import com.soide.ui.DemangleFragment;
 import com.soide.ui.HistoryFragment;
 import com.soide.ui.HomeFragment;
 import com.soide.ui.ParseFragment;
+import com.soide.ui.SettingsFragment;
 import com.soide.ui.ToolsFragment;
 
 import java.io.PrintWriter;
@@ -70,6 +71,9 @@ public class MainActivity extends AppCompatActivity {
     // 历史记录从底部导航移除，单独通过 HomeFragment 卡片打开
     public static final int TAB_HISTORY = 0x7A10;
 
+    // 设置页：单独通过 HomeFragment 卡片打开
+    public static final int TAB_SETTINGS = 0x7A11;
+
     private static final int DEFAULT_TAB = TAB_HOME;
 
     private BottomNavigationView bottomNav;
@@ -79,6 +83,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        // 应用保存的主题 (必须在 super.onCreate 前)
+        applySavedTheme();
         super.onCreate(savedInstanceState);
         Log.i(TAG, "onCreate start");
 
@@ -203,8 +209,20 @@ public class MainActivity extends AppCompatActivity {
             // 历史记录单独加载，不动底部导航
             try {
                 replaceFragment(new HistoryFragment());
+                updateBanner(tabId);
             } catch (Throwable t) {
                 Log.e(TAG, "open history failed", t);
+                showErrorFallback(t);
+            }
+            return;
+        }
+        if (tabId == TAB_SETTINGS) {
+            // 设置页单独加载
+            try {
+                replaceFragment(new SettingsFragment());
+                updateBanner(tabId);
+            } catch (Throwable t) {
+                Log.e(TAG, "open settings failed", t);
                 showErrorFallback(t);
             }
             return;
@@ -254,6 +272,7 @@ public class MainActivity extends AppCompatActivity {
         else if (tabId == TAB_TOOLS) name = "进制转换";
         else if (tabId == TAB_ASSEMBLER) name = "汇编";
         else if (tabId == TAB_HISTORY) name = "历史记录";
+        else if (tabId == TAB_SETTINGS) name = "设置";
         else name = "?";
         statusBanner.setText("SOide v" + BuildConfigHelper.versionName() + "  ·  " + name);
     }
@@ -267,6 +286,33 @@ public class MainActivity extends AppCompatActivity {
     private int dp(int value) {
         return (int) TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics());
+    }
+
+    /**
+     * 在 super.onCreate 之前调用，把 SharedPreferences 里保存的主题模式应用到 AppCompatDelegate。
+     * values-night/themes.xml 会自动接管所有 window 背景、状态栏色等。
+     */
+    private void applySavedTheme() {
+        try {
+            int mode = SettingsFragment.readTheme(this);
+            switch (mode) {
+                case SettingsFragment.THEME_LIGHT:
+                    androidx.appcompat.app.AppCompatDelegate
+                            .setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO);
+                    break;
+                case SettingsFragment.THEME_DARK:
+                    androidx.appcompat.app.AppCompatDelegate
+                            .setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
+                    break;
+                case SettingsFragment.THEME_SYSTEM:
+                default:
+                    androidx.appcompat.app.AppCompatDelegate
+                            .setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM);
+                    break;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "applySavedTheme failed: " + t.getMessage());
+        }
     }
 
     // ============================================================

@@ -78,12 +78,45 @@ public class NativeBridge {
         return out;
     }
 
+    /** ARM64 / AArch64 反汇编 */
+    public static List<DisasmResult> disasmArm64(byte[] code, long address) {
+        List<DisasmResult> out = new ArrayList<>();
+        if (code == null || code.length == 0) return out;
+        if (!supported) return out;
+        try {
+            Object[] rows = nativeDisasm64(code, address);
+            for (Object row : rows) {
+                Object[] cols = (Object[]) row;
+                long addr = (Long) cols[0];
+                int size = (Integer) cols[1];
+                byte[] bytes = (byte[]) cols[2];
+                String mn = (String) cols[3];
+                String op = (String) cols[4];
+                out.add(new DisasmResult(addr, size, bytes, mn, op));
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "native disasm64 failed: " + t.getMessage());
+        }
+        return out;
+    }
+
     public static byte[] assemble(String line, boolean isThumb) {
         if (!supported || line == null) return null;
         try {
             return nativeAssemble(line, isThumb);
         } catch (Throwable t) {
             Log.w(TAG, "native asm failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** ARM64 / AArch64 汇编 */
+    public static byte[] assembleArm64(String line) {
+        if (!supported || line == null) return null;
+        try {
+            return nativeAssemble64(line);
+        } catch (Throwable t) {
+            Log.w(TAG, "native asm64 failed: " + t.getMessage());
             return null;
         }
     }
@@ -100,7 +133,9 @@ public class NativeBridge {
 
     // ----- native methods -----
     private static native Object[] nativeDisasm(byte[] code, long address, boolean isThumb);
+    private static native Object[] nativeDisasm64(byte[] code, long address);
     private static native byte[] nativeAssemble(String line, boolean isThumb);
+    private static native byte[] nativeAssemble64(String line);
     private static native long nativeSysvHash(String name);
     private static native long nativeGnuHash(String name);
     private static native String nativeVersion();

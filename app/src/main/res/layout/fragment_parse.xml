@@ -39,10 +39,10 @@
         style="@style/Widget.Material3.Button" />
 
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_open_cached"
+        android:id="@+id/btn_history"
         android:layout_width="match_parent"
         android:layout_height="56dp"
-        android:text="@string/parse_cached"
+        android:text="@string/tab_history"
         app:icon="@drawable/ic_history"
         app:iconGravity="textStart"
         android:layout_marginTop="8dp"
@@ -81,6 +81,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:scrollbars="vertical"
-        android:layout_marginTop="8dp" />
+        android:layout_marginTop="8dp"
+        android:visibility="gone" />
 
 </LinearLayout>

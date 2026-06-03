@@ -32,6 +32,10 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
 
     private void buildTitles() {
         titles.clear();
+        // v1.4.0: 函数 tab 放在最前面（用户最关心的内容）
+        if (elf.functions != null && !elf.functions.isEmpty()) {
+            titles.add(context.getString(R.string.tab_functions));
+        }
         if (elf.sectionHeaders != null && !elf.sectionHeaders.isEmpty()) {
             titles.add(context.getString(R.string.tab_sections));
         }
@@ -56,9 +60,6 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
         }
         if (elf.strings != null && !elf.strings.isEmpty()) {
             titles.add(context.getString(R.string.tab_strings));
-        }
-        if (elf.functions != null && !elf.functions.isEmpty()) {
-            titles.add(context.getString(R.string.tab_functions));
         }
         if (elf.gnuHash != null || elf.sysvHash != null) {
             titles.add(context.getString(R.string.tab_hash));

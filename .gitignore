@@ -31,6 +31,9 @@ local.properties
 # NDK
 .cxx/
 
+# Gradle
+.gradle/
+
 # Capstone/Keystone sources (downloaded in workflow)
 app/src/main/cpp/third_party/capstone/
 app/src/main/cpp/third_party/keystone/

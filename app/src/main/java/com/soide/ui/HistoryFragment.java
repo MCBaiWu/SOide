@@ -48,7 +48,7 @@ public class HistoryFragment extends Fragment {
             List<ListCardAdapter.Item> items = new java.util.ArrayList<>();
             for (HistoryManager.Entry e : list) {
                 ListCardAdapter.Item it = new ListCardAdapter.Item(
-                        R.drawable.ic_file,
+                        R.drawable.ic_so_file,
                         e.fileName != null ? e.fileName : "(no name)",
                         fmt.format(new Date(e.timestamp)),
                         String.format("size=%d  •  %s", e.size,

@@ -50,5 +50,9 @@ public class SoDetailActivity extends AppCompatActivity {
         new TabLayoutMediator(tl, vp, (tab, position) -> {
             tab.setText(adapter.getTabTitle(position));
         }).attach();
+        // v1.4.0: 默认选中第一个 tab（通常是"函数"）
+        if (vp.getChildCount() > 0 && adapter.getItemCount() > 0) {
+            vp.setCurrentItem(0, false);
+        }
     }
 }

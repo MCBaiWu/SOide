@@ -10,17 +10,26 @@ extern "C" {
 
 typedef struct ndk_insn {
     uint64_t address;
-    uint16_t size;          // 2 (Thumb) or 4 (ARM)
+    uint16_t size;          // 2 (Thumb) / 4 (ARM) / 4 (AArch64)
     uint32_t bytes[4];      // 最多 8 字节（存 4 个 uint32_t，留足空间）
     char     mnemonic[16];
     char     op_str[64];
 } ndk_insn_t;
 struct ndk_insn;  // 旧名兼容 alias，保留以防旧 cpp 引用
 
+// ARM32 反汇编：is_thumb=0 → ARM, is_thumb=1 → Thumb
 int ndk_disasm_arm(const uint8_t* code, size_t len, uint64_t address, int is_thumb,
                    ndk_insn_t* out, int max_out);
 
+// ARM64 (AArch64) 反汇编
+int ndk_disasm_arm64(const uint8_t* code, size_t len, uint64_t address,
+                     ndk_insn_t* out, int max_out);
+
+// ARM32 汇编：is_thumb=0 → ARM, is_thumb=1 → Thumb
 int ndk_asm_arm(const char* line, int is_thumb, uint8_t* out, int max_out);
+
+// ARM64 (AArch64) 汇编
+int ndk_asm_arm64(const char* line, uint8_t* out, int max_out);
 
 uint32_t ndk_sysv_hash(const char* name);
 uint32_t ndk_gnu_hash(const char* name);

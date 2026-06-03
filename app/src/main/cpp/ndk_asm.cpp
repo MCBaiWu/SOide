@@ -5,6 +5,10 @@
 // 静态库由 CI workflow 预构建为 third_party/keystone/lib/<ABI>/libkeystone.a
 // 并在 CMakeLists.txt 中链接；头文件在 include/keystone/keystone.h。
 //
+// 支持的架构：
+//   - ARM  (KS_ARCH_ARM,    KS_MODE_ARM / KS_MODE_THUMB)
+//   - AArch64/ARM64 (KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
+//
 // 反汇编端 (ndk_disasm.cpp) 使用的真库是 capstone-engine/capstone。
 // ----------------------------------------------------------------------
 #include <cstdint>
@@ -18,13 +22,12 @@
 
 #include "ndk_native.h"
 
-extern "C" int ndk_asm_arm(const char* line, int is_thumb, uint8_t* out, int max_out) {
+static int do_ks_asm(ks_arch arch, ks_mode mode,
+                     const char* line, uint8_t* out, int max_out) {
     if (!line || !out || max_out <= 0) return 0;
 
     ks_engine* ks = nullptr;
-    ks_err err = ks_open(KS_ARCH_ARM,
-                         is_thumb ? KS_MODE_THUMB : KS_MODE_ARM,
-                         &ks);
+    ks_err err = ks_open(arch, mode, &ks);
     if (err != KS_ERR_OK || ks == nullptr) {
         return 0;
     }
@@ -44,4 +47,16 @@ extern "C" int ndk_asm_arm(const char* line, int is_thumb, uint8_t* out, int max
     if (encode) ks_free(encode);
     ks_close(ks);
     return produced;
+}
+
+extern "C" int ndk_asm_arm(const char* line, int is_thumb, uint8_t* out, int max_out) {
+    return do_ks_asm(KS_ARCH_ARM,
+                      is_thumb ? KS_MODE_THUMB : KS_MODE_ARM,
+                      line, out, max_out);
+}
+
+extern "C" int ndk_asm_arm64(const char* line, uint8_t* out, int max_out) {
+    // Keystone AArch64 走 KS_ARCH_ARM64 + KS_MODE_LITTLE_ENDIAN
+    return do_ks_asm(KS_ARCH_ARM64, (ks_mode) KS_MODE_LITTLE_ENDIAN,
+                      line, out, max_out);
 }
