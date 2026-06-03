@@ -1,6 +1,8 @@
 package com.soide.ui;
 
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,6 +14,7 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.textfield.TextInputEditText;
 import com.soide.R;
 import com.soide.elf.ElfFile;
 
@@ -21,6 +24,8 @@ import java.util.List;
 /**
  * 通用列表 tab：渲染一种类型的所有条目。
  * 通过 kind 区分数据来源。
+ * <p>
+ * v1.4.1 增加搜索栏：按 title / subtitle / type / meta 关键字过滤。
  */
 public class DetailListTabFragment extends Fragment {
 
@@ -44,6 +49,9 @@ public class DetailListTabFragment extends Fragment {
     private RecyclerView rv;
     private TextView tvCount;
     private DetailAdapter adapter;
+    private TextInputEditText etSearch;
+    private List<DetailAdapter.Item> allItems = new ArrayList<>();
+    private String currentQuery = "";
 
     public static DetailListTabFragment newInstance(int kind, ElfFile elf) {
         DetailListTabFragment f = new DetailListTabFragment();
@@ -71,15 +79,62 @@ public class DetailListTabFragment extends Fragment {
         }
         rv = view.findViewById(R.id.recycler);
         tvCount = view.findViewById(R.id.tv_count);
+        etSearch = view.findViewById(R.id.et_search);
         rv.setLayoutManager(new LinearLayoutManager(requireContext()));
-        List<DetailAdapter.Item> items = build();
-        adapter = new DetailAdapter(items, this::onItemClick);
+        allItems = build();
+        adapter = new DetailAdapter(filter(allItems, currentQuery), this::onItemClick);
         rv.setAdapter(adapter);
-        tvCount.setText(items.size() + " 项");
+        updateCount(allItems.size(), filter(allItems, currentQuery).size());
+
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                currentQuery = s.toString();
+                List<DetailAdapter.Item> filtered = filter(allItems, currentQuery);
+                adapter = new DetailAdapter(filtered, DetailListTabFragment.this::onItemClick);
+                rv.setAdapter(adapter);
+                updateCount(allItems.size(), filtered.size());
+            }
+        });
+    }
+
+    private void updateCount(int total, int shown) {
+        if (total == shown) {
+            tvCount.setText(total + " 项");
+        } else {
+            tvCount.setText(shown + " / " + total + " 项");
+        }
     }
 
     private void onItemClick(DetailAdapter.Item item) {
         // TODO: 点击符号或函数可跳到详情
+    }
+
+    /**
+     * 大小写不敏感的多字段模糊匹配。
+     * 支持 "0x" / 十六进制地址识别: 用户输入 0x1234 时匹配所有 "0x1234" 子串。
+     */
+    private static List<DetailAdapter.Item> filter(List<DetailAdapter.Item> src, String q) {
+        if (q == null || q.trim().isEmpty()) return new ArrayList<>(src);
+        String q0 = q.trim().toLowerCase();
+        List<DetailAdapter.Item> out = new ArrayList<>();
+        for (DetailAdapter.Item it : src) {
+            if (matches(it, q0)) out.add(it);
+        }
+        return out;
+    }
+
+    private static boolean matches(DetailAdapter.Item it, String q) {
+        if (it == null) return false;
+        if (contains(it.title, q) || contains(it.subtitle, q) || contains(it.type, q) || contains(it.meta, q)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean contains(String s, String q) {
+        return s != null && s.toLowerCase().contains(q);
     }
 
     private List<DetailAdapter.Item> build() {

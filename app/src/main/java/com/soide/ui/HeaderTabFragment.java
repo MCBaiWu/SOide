@@ -1,6 +1,8 @@
 package com.soide.ui;
 
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,25 +14,33 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.textfield.TextInputEditText;
 import com.soide.R;
-import com.soide.elf.ElfFile;
 import com.soide.elf.ElfConstants;
+import com.soide.elf.ElfFile;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * ELF 头 tab：显示关键元数据项。
+ * v1.4.1 增加搜索栏。
  */
 public class HeaderTabFragment extends Fragment {
+
+    private ElfFile elf;
+    private RecyclerView rv;
+    private TextView tvCount;
+    private TextInputEditText etSearch;
+    private DetailAdapter adapter;
+    private List<DetailAdapter.Item> allItems = new ArrayList<>();
+    private String currentQuery = "";
 
     public static HeaderTabFragment newInstance(ElfFile elf) {
         HeaderTabFragment f = new HeaderTabFragment();
         f.elf = elf;
         return f;
     }
-
-    private ElfFile elf;
 
     @Nullable
     @Override
@@ -43,14 +53,52 @@ public class HeaderTabFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        TextView tvCount = view.findViewById(R.id.tv_count);
-        RecyclerView rv = view.findViewById(R.id.recycler);
+        tvCount = view.findViewById(R.id.tv_count);
+        rv = view.findViewById(R.id.recycler);
+        etSearch = view.findViewById(R.id.et_search);
         rv.setLayoutManager(new LinearLayoutManager(requireContext()));
 
-        List<DetailAdapter.Item> items = build();
-        DetailAdapter adapter = new DetailAdapter(items, i -> {});
+        allItems = build();
+        adapter = new DetailAdapter(filter(allItems, currentQuery), i -> {});
         rv.setAdapter(adapter);
-        tvCount.setText("ELF 文件头");
+        updateCount();
+
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                currentQuery = s.toString();
+                adapter = new DetailAdapter(filter(allItems, currentQuery), i -> {});
+                rv.setAdapter(adapter);
+                updateCount();
+            }
+        });
+    }
+
+    private void updateCount() {
+        if (allItems.size() == filter(allItems, currentQuery).size()) {
+            tvCount.setText("ELF 文件头");
+        } else {
+            tvCount.setText("ELF 文件头  ·  " + filter(allItems, currentQuery).size()
+                    + " / " + allItems.size());
+        }
+    }
+
+    private static List<DetailAdapter.Item> filter(List<DetailAdapter.Item> src, String q) {
+        if (q == null || q.trim().isEmpty()) return new ArrayList<>(src);
+        String q0 = q.trim().toLowerCase();
+        List<DetailAdapter.Item> out = new ArrayList<>();
+        for (DetailAdapter.Item it : src) {
+            if (it == null) continue;
+            if (contains(it.title, q0) || contains(it.subtitle, q0) || contains(it.type, q0)) {
+                out.add(it);
+            }
+        }
+        return out;
+    }
+
+    private static boolean contains(String s, String q) {
+        return s != null && s.toLowerCase().contains(q);
     }
 
     private List<DetailAdapter.Item> build() {

@@ -193,25 +193,55 @@ public class ElfParser {
     }
 
     private void parseSymbolTables() {
-        Map<Long, String> dynstrMap = new HashMap<>();
-        String dynstr = null;
-
+        // 先扫一遍收集 strtab (.strtab / .dynstr) 备用
+        Map<String, SectionHeader> strtabs = new java.util.HashMap<>();
         for (SectionHeader sh : elfFile.sectionHeaders) {
-            if (".dynstr".equals(sh.name)) {
-                dynstr = readString(sh.shOffset, (int) sh.shSize);
-                break;
+            if (sh.shType == ElfConstants.SHT_STRTAB && sh.name != null) {
+                strtabs.put(sh.name, sh);
             }
         }
 
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (sh.shType == ElfConstants.SHT_SYMTAB) {
-                elfFile.symtabEntries = parseSymbols(sh, null);
+                // 符号表的字符串表: sh_link 指向 .strtab
+                String strtab = resolveStrtab(sh, strtabs);
+                List<SymbolEntry> list = parseSymbols(sh, strtab);
+                elfFile.symtabEntries = list;
             } else if (sh.shType == ElfConstants.SHT_DYNSYM) {
+                // 动态符号表的字符串表: sh_link 指向 .dynstr
                 dynsymSec = sh;
-                dynsymForRel = parseSymbols(sh, dynstr);
+                String strtab = resolveStrtab(sh, strtabs);
+                dynsymForRel = parseSymbols(sh, strtab);
                 elfFile.dynsymEntries = dynsymForRel;
             }
         }
+    }
+
+    /**
+     * 通过 sh_link 找到符号表对应的字符串表。
+     * 优先用 sh_link；fallback 到按名字找 .strtab / .dynstr。
+     */
+    private String resolveStrtab(SectionHeader symSh, Map<String, SectionHeader> strtabs) {
+        if (symSh.shLink > 0 && symSh.shLink < elfFile.sectionHeaders.size()) {
+            SectionHeader linked = elfFile.sectionHeaders.get(symSh.shLink);
+            if (linked != null && linked.shSize > 0) {
+                long sz = Math.min(linked.shSize, data.length - linked.shOffset);
+                if (sz > 0) {
+                    return readString(linked.shOffset, (int) sz);
+                }
+            }
+        }
+        // fallback: 按名字匹配
+        String wanted = ".strtab";
+        if (symSh.shType == ElfConstants.SHT_DYNSYM) wanted = ".dynstr";
+        SectionHeader sh = strtabs.get(wanted);
+        if (sh != null && sh.shSize > 0) {
+            long sz = Math.min(sh.shSize, data.length - sh.shOffset);
+            if (sz > 0) {
+                return readString(sh.shOffset, (int) sz);
+            }
+        }
+        return null;
     }
 
     private List<SymbolEntry> parseSymbols(SectionHeader sh, String strtab) {
@@ -493,9 +523,13 @@ public class ElfParser {
     }
 
     /**
-     * 解析函数（来自 .symtab / .dynsym，类型为 FUNC 且尺寸 > 0），并反汇编。
+     * 解析函数（来自 .symtab / .dynsym，类型为 FUNC），并反汇编。
      * 同时通过 {@link LinearSweepAnalyzer} 在可执行节区上做线性扫描，发现额外函数。
      * 对 ARM32 自动识别 Thumb 模式。
+     * <p>
+     * v1.4.1 改进：
+     * - 允许 size=0 的函数（用默认 32 字节做反汇编）
+     * - 未命名的 FUNC 符号自动生成 sub_xxx 名称
      */
     private void parseFunctions() {
         List<FunctionInfo> symtabFuncs = new ArrayList<>();
@@ -507,41 +541,74 @@ public class ElfParser {
 
         for (SymbolEntry se : sources) {
             if (se.getType() != ElfConstants.STT_FUNC) continue;
-            if (se.stSize <= 0) continue;
-            if (se.name == null || se.name.isEmpty()) continue;
-            if (se.name.startsWith("$")) continue; // 跳过编译器内部符号
-            if (se.name.startsWith("__")) continue; // 跳过程序集辅助符号
+            if (se.stValue == 0) continue; // 跳过无地址符号
+            if (se.name != null) {
+                if (se.name.isEmpty()) se.name = null;
+                else if (se.name.startsWith("$")) continue; // 跳过编译器内部符号
+                else if (se.name.startsWith("__")) continue; // 跳过程序集辅助符号
+            }
 
-            // 找到所属节区
+            // 找到所属节区（符号地址落在 [shAddr, shAddr+shSize) 范围）
             SectionHeader funcSec = null;
             if (se.stShndx > 0 && se.stShndx < elfFile.sectionHeaders.size()) {
                 SectionHeader candidate = elfFile.sectionHeaders.get(se.stShndx);
                 if (candidate.shType != ElfConstants.SHT_NOBITS
                         && se.stValue >= candidate.shAddr
-                        && se.stValue + se.stSize <= candidate.shAddr + candidate.shSize) {
+                        && se.stValue < candidate.shAddr + candidate.shSize) {
                     funcSec = candidate;
+                }
+            }
+            // fallback: 按地址范围线性找节区
+            if (funcSec == null) {
+                for (SectionHeader c : elfFile.sectionHeaders) {
+                    if (c.shType == ElfConstants.SHT_NOBITS) continue;
+                    if (c.shAddr <= se.stValue && se.stValue < c.shAddr + c.shSize) {
+                        funcSec = c;
+                        break;
+                    }
                 }
             }
             if (funcSec == null) continue;
 
-            // 限制最大函数大小（防止反汇编卡死）
-            long size = Math.min(se.stSize, 8 * 1024);
-
-            long fileOff = funcSec.shOffset + (se.stValue - funcSec.shAddr);
-            if (fileOff < 0 || fileOff + size > data.length) continue;
-
-            byte[] code = Arrays.copyOfRange(data, (int) fileOff, (int) (fileOff + size));
-
-            // ARM32 模式识别：检查符号 LSB=1 或 prologue 字节
-            boolean thumb = isThumbFunction(elfFile.header.eMachine, se, code);
+            // ARM32 Thumb: stValue 的 LSB 是 Thumb 位 (>= 1)
+            boolean thumb = isThumbFunction(elfFile.header.eMachine, se, null);
+            long funcAddr = se.stValue & ~1L; // 清除 LSB 得到真实地址
             disasm.setThumb(thumb);
 
-            List<DisassembledInstruction> insns = disasm.disassemble(code, se.stValue);
+            // 限制最大函数大小（防止反汇编卡死）
+            long size = se.stSize > 0 ? se.stSize : DEFAULT_FUNC_SIZE;
+            size = Math.min(size, MAX_FUNC_SIZE);
 
-            FunctionInfo fi = new FunctionInfo(se.name, se.stValue, se.stSize,
-                    funcSec.name != null ? funcSec.name : "");
+            long fileOff = funcSec.shOffset + (funcAddr - funcSec.shAddr);
+            if (fileOff < 0 || fileOff + size > data.length) {
+                // 文件边界裁剪
+                if (fileOff < 0) continue;
+                size = Math.max(0, data.length - fileOff);
+                if (size < 4) continue;
+                size = Math.min(size, MAX_FUNC_SIZE);
+            }
+
+            byte[] code = Arrays.copyOfRange(data, (int) fileOff, (int) (fileOff + size));
+            if (thumb && elfFile.header.eMachine == ElfConstants.EM_ARM) {
+                // 二次判断 prologue
+                if (!thumb && Disassembler.looksLikeThumb(code)) {
+                    thumb = true;
+                    disasm.setThumb(true);
+                }
+            }
+
+            List<DisassembledInstruction> insns = disasm.disassemble(code, funcAddr);
+
+            // 函数名：优先用符号名，否则生成 sub_<hex>
+            String fname = se.name;
+            if (fname == null || fname.isEmpty()) {
+                fname = "sub_" + Long.toHexString(funcAddr);
+            }
+
+            FunctionInfo fi = new FunctionInfo(fname, funcAddr, se.stSize, funcSec.name);
             fi.instructions = insns;
             fi.isThumb = thumb;
+            fi.source = LinearSweepAnalyzer.SOURCE_SYMTAB;
             symtabFuncs.add(fi);
         }
 
@@ -574,11 +641,15 @@ public class ElfParser {
         elfFile.functions = all;
     }
 
+    private static final long DEFAULT_FUNC_SIZE = 32;
+    private static final long MAX_FUNC_SIZE = 8 * 1024;
+
     private static boolean isThumbFunction(int machine, SymbolEntry se, byte[] code) {
         if (machine != ElfConstants.EM_ARM) return false;
         // 1) 符号地址 LSB=1 (Thumb 函数入口标志)
         if ((se.stValue & 1L) == 1L) return true;
         // 2) prologue 字节
+        if (code == null || code.length < 2) return false;
         return Disassembler.looksLikeThumb(code);
     }
 
