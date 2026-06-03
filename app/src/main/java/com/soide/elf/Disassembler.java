@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import capstone.Capstone;
+import capstone.api.Instruction;
 
 /**
  * Capstone 反汇编器封装
@@ -35,7 +36,6 @@ public class Disassembler {
                 this.mode = Capstone.CS_MODE_64;
                 break;
             default:
-                // 默认按 64 位小端 ARM 处理
                 this.arch = Capstone.CS_ARCH_ARM64;
                 this.mode = Capstone.CS_MODE_ARM;
         }
@@ -58,21 +58,37 @@ public class Disassembler {
             return result;
         }
 
+        Capstone cs = null;
         try {
-            Capstone cs = new Capstone(arch, mode);
-            Capstone.CsInsn[] insns = cs.disasm(code, address);
-            for (Capstone.CsInsn insn : insns) {
-                result.add(new DisassembledInstruction(
-                        insn.address,
-                        insn.bytes,
-                        insn.mnemonic,
-                        insn.opStr
-                ));
+            cs = new Capstone(arch, mode);
+            Instruction[] insns = cs.disasm(code, address);
+            for (Instruction insn : insns) {
+                long addr;
+                byte[] bytes;
+                String mnemonic;
+                String opStr;
+                if (insn instanceof Capstone.CsInsn) {
+                    Capstone.CsInsn csi = (Capstone.CsInsn) insn;
+                    addr = csi.getAddress();
+                    bytes = csi.bytes;
+                    mnemonic = csi.mnemonic;
+                    opStr = csi.opStr;
+                } else {
+                    addr = insn.getAddress();
+                    bytes = insn.getBytes();
+                    mnemonic = insn.getMnemonic();
+                    opStr = insn.getOpStr();
+                }
+                result.add(new DisassembledInstruction(addr, bytes, mnemonic, opStr));
             }
         } catch (Throwable t) {
             // 反汇编失败时降级为单条 .byte 指令
             result.add(new DisassembledInstruction(
                     address, code, "byte", "(disassembly failed: " + t.getMessage() + ")"));
+        } finally {
+            if (cs != null) {
+                try { cs.close(); } catch (Exception ignored) {}
+            }
         }
 
         return result;
