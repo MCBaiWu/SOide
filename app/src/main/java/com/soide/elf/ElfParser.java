@@ -491,10 +491,12 @@ public class ElfParser {
     }
 
     /**
-     * 解析函数（来自 .symtab / .dynsym，类型为 FUNC 且尺寸 > 0），并反汇编
+     * 解析函数（来自 .symtab / .dynsym，类型为 FUNC 且尺寸 > 0），并反汇编。
+     * 同时通过 {@link LinearSweepAnalyzer} 在可执行节区上做线性扫描，发现额外函数。
+     * 对 ARM32 自动识别 Thumb 模式。
      */
     private void parseFunctions() {
-        List<FunctionInfo> funcs = new ArrayList<>();
+        List<FunctionInfo> symtabFuncs = new ArrayList<>();
         List<SymbolEntry> sources = new ArrayList<>();
         if (elfFile.symtabEntries != null) sources.addAll(elfFile.symtabEntries);
         if (elfFile.dynsymEntries != null) sources.addAll(elfFile.dynsymEntries);
@@ -527,15 +529,55 @@ public class ElfParser {
             if (fileOff < 0 || fileOff + size > data.length) continue;
 
             byte[] code = Arrays.copyOfRange(data, (int) fileOff, (int) (fileOff + size));
+
+            // ARM32 模式识别：检查符号 LSB=1 或 prologue 字节
+            boolean thumb = isThumbFunction(elfFile.header.eMachine, se, code);
+            disasm.setThumb(thumb);
+
             List<DisassembledInstruction> insns = disasm.disassemble(code, se.stValue);
 
             FunctionInfo fi = new FunctionInfo(se.name, se.stValue, se.stSize,
                     funcSec.name != null ? funcSec.name : "");
             fi.instructions = insns;
-            funcs.add(fi);
+            fi.isThumb = thumb;
+            symtabFuncs.add(fi);
         }
 
-        elfFile.functions = funcs;
+        // 合并线性扫描结果
+        List<FunctionInfo> all = new ArrayList<>(symtabFuncs);
+        if (elfFile.header.eMachine == ElfConstants.EM_ARM
+                || elfFile.header.eMachine == ElfConstants.EM_AARCH64
+                || elfFile.header.eMachine == ElfConstants.EM_386
+                || elfFile.header.eMachine == ElfConstants.EM_X86_64) {
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (sh.shType != ElfConstants.SHT_PROGBITS) continue;
+                if (sh.shSize < 8) continue;
+                // 只在 .text 之类可执行节区上扫描
+                String name = sh.name != null ? sh.name : "";
+                if (!(name.contains("text") || name.contains("plt") || name.contains("init")
+                        || name.contains("fini"))) continue;
+                if ((int) sh.shOffset + (int) sh.shSize > data.length) continue;
+
+                // 重置 disasm 到 ARM 模式
+                disasm.setThumb(false);
+                List<Long> hits = LinearSweepAnalyzer.scan(sh, data,
+                        elfFile.header.eMachine, is64Bit);
+                all = LinearSweepAnalyzer.mergeWithSymbols(symtabFuncs, hits, sh, disasm,
+                        elfFile.header.eMachine, data);
+            }
+        }
+
+        // 对函数按地址排序
+        java.util.Collections.sort(all, (a, b) -> Long.compare(a.address, b.address));
+        elfFile.functions = all;
+    }
+
+    private static boolean isThumbFunction(int machine, SymbolEntry se, byte[] code) {
+        if (machine != ElfConstants.EM_ARM) return false;
+        // 1) 符号地址 LSB=1 (Thumb 函数入口标志)
+        if ((se.stValue & 1L) == 1L) return true;
+        // 2) prologue 字节
+        return Disassembler.looksLikeThumb(code);
     }
 
     private String readString(long offset, int maxLen) {
@@ -549,5 +591,25 @@ public class ElfParser {
 
         byte[] bytes = Arrays.copyOfRange(data, start, term);
         return new String(bytes);
+    }
+
+    public static String fileTypeName(int type) {
+        return ElfConstants.getFileTypeName(type);
+    }
+
+    public static String machineName(int machine) {
+        return ElfConstants.getMachineName(machine);
+    }
+
+    public static String sectionTypeName(int type) {
+        return ElfConstants.getSectionTypeName(type);
+    }
+
+    public static String programTypeName(int type) {
+        return ElfConstants.getProgramTypeName(type);
+    }
+
+    public static String dynamicTagName(long tag) {
+        return ElfConstants.getDynamicTagName(tag);
     }
 }

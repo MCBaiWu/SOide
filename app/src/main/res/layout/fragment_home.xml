@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp"
+            app:cardBackgroundColor="?attr/colorPrimaryContainer">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="24dp">
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_title"
+                    android:textAppearance="?attr/textAppearanceHeadlineMedium"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_subtitle"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:layout_marginTop="4dp" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/tv_version"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_version"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:layout_marginTop="8dp"
+                    android:alpha="0.7" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.textview.MaterialTextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/home_intro"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="?attr/colorOnSurface"
+            android:layout_marginTop="24dp"
+            android:lineSpacingExtra="4dp" />
+
+        <com.google.android.material.textview.MaterialTextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="主要功能"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textColor="?attr/colorOnSurface"
+            android:layout_marginTop="32dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_parse"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="@string/tab_parse"
+            app:icon="@drawable/ic_parse"
+            app:iconGravity="textStart"
+            android:layout_marginTop="12dp"
+            app:cornerRadius="16dp"
+            style="@style/Widget.Material3.Button.TonalButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_demangle"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="@string/tab_demangle"
+            app:icon="@drawable/ic_demangle"
+            app:iconGravity="textStart"
+            android:layout_marginTop="8dp"
+            app:cornerRadius="16dp"
+            style="@style/Widget.Material3.Button.TonalButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_tools"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="@string/tab_tools"
+            app:icon="@drawable/ic_tools"
+            app:iconGravity="textStart"
+            android:layout_marginTop="8dp"
+            app:cornerRadius="16dp"
+            style="@style/Widget.Material3.Button.TonalButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_assembler"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="@string/tab_assembler"
+            app:icon="@drawable/ic_assembler"
+            app:iconGravity="textStart"
+            android:layout_marginTop="8dp"
+            app:cornerRadius="16dp"
+            style="@style/Widget.Material3.Button.TonalButton" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

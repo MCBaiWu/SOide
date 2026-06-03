@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_home"
+        android:title="@string/tab_home" />
+    <item
+        android:id="@+id/nav_parse"
+        android:icon="@drawable/ic_parse"
+        android:title="@string/tab_parse" />
+    <item
+        android:id="@+id/nav_demangle"
+        android:icon="@drawable/ic_demangle"
+        android:title="@string/tab_demangle" />
+    <item
+        android:id="@+id/nav_history"
+        android:icon="@drawable/ic_history"
+        android:title="@string/tab_history" />
+    <item
+        android:id="@+id/nav_tools"
+        android:icon="@drawable/ic_tools"
+        android:title="@string/tab_tools" />
+    <item
+        android:id="@+id/nav_assembler"
+        android:icon="@drawable/ic_assembler"
+        android:title="@string/tab_assembler" />
+</menu>

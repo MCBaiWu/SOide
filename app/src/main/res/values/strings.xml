@@ -1,14 +1,80 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SOide</string>
+
+    <!-- 主界面标签 -->
+    <string name="tab_home">首页</string>
+    <string name="tab_parse">SO 解析</string>
+    <string name="tab_demangle">C++ 符号</string>
+    <string name="tab_history">历史记录</string>
+    <string name="tab_tools">进制转换</string>
+    <string name="tab_assembler">汇编</string>
+
+    <!-- 通用 -->
     <string name="select_file">选择 SO/ELF 文件</string>
     <string name="parsing">正在解析…</string>
     <string name="parse_success">解析完成</string>
     <string name="parse_failed">解析失败</string>
-    <string name="elf_header">ELF 文件头</string>
-    <string name="section_headers">节区头表</string>
-    <string name="program_headers">程序头表</string>
-    <string name="symbol_table">符号表</string>
-    <string name="dynamic_section">动态段</string>
     <string name="no_file_selected">请选择要解析的 .so 文件</string>
+    <string name="empty_text">— 空 —</string>
+    <string name="copy">复制</string>
+    <string name="copied">已复制</string>
+
+    <!-- 旧标签页 (v1.1.0) -->
+    <string name="tab_header">ELF 头</string>
+    <string name="tab_sections">节区</string>
+    <string name="tab_programs">段</string>
+    <string name="tab_symbols">符号</string>
+    <string name="tab_dynamic">动态</string>
+    <string name="tab_relocations">重定位</string>
+    <string name="tab_strings">字符串</string>
+    <string name="tab_functions">函数</string>
+
+    <!-- 详情页类型 -->
+    <string name="kind_string">字符串</string>
+    <string name="kind_section">节区</string>
+    <string name="kind_program">段</string>
+    <string name="kind_symbol">符号</string>
+    <string name="kind_function">函数</string>
+    <string name="kind_relocation">重定位</string>
+    <string name="kind_dynamic">动态</string>
+
+    <!-- 首页 -->
+    <string name="home_title">SOide</string>
+    <string name="home_subtitle">Android ELF/.SO 文件分析工具</string>
+    <string name="home_intro">从底部选择一个功能开始：解析 SO 文件、解码 C++ 符号、查看历史记录、进制转换、汇编 / 反汇编。</string>
+    <string name="home_version">v1.2.0</string>
+
+    <!-- SO 解析 -->
+    <string name="parse_choose">选择 SO 文件开始解析</string>
+    <string name="parse_open">选择文件</string>
+    <string name="parse_loading">正在加载并解析…</string>
+    <string name="parse_cached">已缓存</string>
+
+    <!-- C++ 解码 -->
+    <string name="demangle_hint">粘贴需要解码的 C++ 符号 (Itanium ABI)，例如 _ZN3foo3barEi</string>
+    <string name="demangle_action">解码</string>
+    <string name="demangle_empty">等待输入…</string>
+
+    <!-- 历史记录 -->
+    <string name="history_empty">暂无历史记录</string>
+    <string name="history_clear">清空</string>
+    <string name="history_recent">最近分析的 SO 文件</string>
+
+    <!-- 进制转换 -->
+    <string name="base_input">输入数字</string>
+    <string name="base_bin">二进制 (BIN)</string>
+    <string name="base_oct">八进制 (OCT)</string>
+    <string name="base_dec">十进制 (DEC)</string>
+    <string name="base_hex">十六进制 (HEX)</string>
+    <string name="base_input_hint">输入 BIN / DEC / HEX (0x 前缀) 数字</string>
+
+    <!-- 汇编器 -->
+    <string name="asm_hint">输入一条 ARM/Thumb 汇编指令，例如 mov r0, #1</string>
+    <string name="asm_action">汇编</string>
+    <string name="asm_mode_arm">ARM (32-bit)</string>
+    <string name="asm_mode_thumb">Thumb (16-bit)</string>
+    <string name="asm_result">机器码</string>
+    <string name="asm_supported">支持的指令子集：mov, movw, movt, add, sub, ldr, str, push, pop, nop, b, bl, bx, blx, cmp, tst, and, orr, eor, mvn, lsl, lsr, asr</string>
+    <string name="asm_failed">无法识别指令</string>
 </resources>

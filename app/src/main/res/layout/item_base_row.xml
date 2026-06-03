@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical">
+
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/tv_label"
+        android:layout_width="100dp"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceLabelMedium"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/tv_value"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:fontFamily="monospace"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurface"
+        android:textIsSelectable="true" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_copy"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/copy"
+        style="@style/Widget.Material3.Button.TextButton" />
+
+</LinearLayout>
