@@ -93,4 +93,12 @@
         android:layout_marginTop="12dp"
         android:lineSpacingExtra="3dp" />
 
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/tv_native_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceLabelSmall"
+        android:textColor="?attr/colorPrimary"
+        android:layout_marginTop="8dp" />
+
 </LinearLayout>

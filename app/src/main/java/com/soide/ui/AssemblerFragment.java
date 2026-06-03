@@ -18,6 +18,7 @@ import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textview.MaterialTextView;
 import com.soide.R;
+import com.soide.nativebridge.NativeBridge;
 import com.soide.util.Assembler;
 
 public class AssemblerFragment extends Fragment {
@@ -42,6 +43,14 @@ public class AssemblerFragment extends Fragment {
         TextInputEditText et = view.findViewById(R.id.et_input);
         MaterialButton btn = view.findViewById(R.id.btn_assemble);
         MaterialTextView tv = view.findViewById(R.id.tv_result);
+        MaterialTextView tvNative = view.findViewById(R.id.tv_native_status);
+
+        if (tvNative != null) {
+            String n = NativeBridge.isSupported()
+                    ? "✓ Native (NDK): " + NativeBridge.getVersion()
+                    : "✗ NDK 未加载，使用 Java 实现";
+            tvNative.setText(n);
+        }
 
         tab.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
@@ -59,7 +68,20 @@ public class AssemblerFragment extends Fragment {
                 Toast.makeText(requireContext(), "请输入指令", Toast.LENGTH_SHORT).show();
                 return;
             }
-            Assembler.Result r = Assembler.assemble(input, currentMode);
+            // 优先使用 NDK native assembler
+            byte[] nbytes = NativeBridge.assemble(input, currentMode == Assembler.MODE_THUMB);
+            Assembler.Result r;
+            if (nbytes != null && nbytes.length > 0) {
+                StringBuilder hex = new StringBuilder();
+                for (int i = 0; i < nbytes.length; i++) {
+                    if (i > 0) hex.append(' ');
+                    hex.append(String.format("%02x", nbytes[i] & 0xff));
+                }
+                r = new Assembler.Result(hex.toString(), nbytes, true, null);
+            } else {
+                // 回退到 Java
+                r = Assembler.assemble(input, currentMode);
+            }
             if (r.ok) {
                 tv.setText(r.hex + "\n\n(" + (r.bytes.length * 8) + " bits, " + r.bytes.length + " bytes)");
                 tv.setOnLongClickListener(v1 -> {

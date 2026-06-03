@@ -18,4 +18,7 @@ public class ElfFile {
     public List<ExtractedString> strings;
     public List<RelocationEntry> relocations;
     public List<FunctionInfo> functions;
+    public List<ImportedFunction> imports;
+    public HashLookup gnuHash;
+    public HashLookup sysvHash;
 }

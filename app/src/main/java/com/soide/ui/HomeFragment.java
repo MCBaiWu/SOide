@@ -28,24 +28,33 @@ public class HomeFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        MaterialTextView tv = view.findViewById(R.id.tv_version);
-        tv.setText("v" + BuildConfigHelper.versionName());
+        try {
+            MaterialTextView tv = view.findViewById(R.id.tv_version);
+            if (tv != null) {
+                tv.setText("v" + BuildConfigHelper.versionName());
+            }
 
-        MaterialButton btnParse = view.findViewById(R.id.btn_open_parse);
-        MaterialButton btnDemangle = view.findViewById(R.id.btn_open_demangle);
-        MaterialButton btnTools = view.findViewById(R.id.btn_open_tools);
-        MaterialButton btnAsm = view.findViewById(R.id.btn_open_assembler);
+            MaterialButton btnParse = view.findViewById(R.id.btn_open_parse);
+            MaterialButton btnDemangle = view.findViewById(R.id.btn_open_demangle);
+            MaterialButton btnTools = view.findViewById(R.id.btn_open_tools);
+            MaterialButton btnAsm = view.findViewById(R.id.btn_open_assembler);
 
-        btnParse.setOnClickListener(v -> navigate(R.id.nav_parse));
-        btnDemangle.setOnClickListener(v -> navigate(R.id.nav_demangle));
-        btnTools.setOnClickListener(v -> navigate(R.id.nav_tools));
-        btnAsm.setOnClickListener(v -> navigate(R.id.nav_assembler));
+            if (btnParse != null) btnParse.setOnClickListener(v -> navigate(R.id.nav_parse));
+            if (btnDemangle != null) btnDemangle.setOnClickListener(v -> navigate(R.id.nav_demangle));
+            if (btnTools != null) btnTools.setOnClickListener(v -> navigate(R.id.nav_tools));
+            if (btnAsm != null) btnAsm.setOnClickListener(v -> navigate(R.id.nav_assembler));
+        } catch (Throwable t) {
+            android.util.Log.e("HomeFragment", "init failed", t);
+        }
     }
 
     private void navigate(int id) {
-        if (getActivity() instanceof MainActivity) {
-            BottomNavigationView nav = ((MainActivity) getActivity()).findViewById(R.id.bottom_navigation);
-            if (nav != null) nav.setSelectedItemId(id);
-        }
+        try {
+            if (getActivity() instanceof MainActivity) {
+                BottomNavigationView nav = ((MainActivity) getActivity())
+                        .findViewById(R.id.bottom_navigation);
+                if (nav != null) nav.setSelectedItemId(id);
+            }
+        } catch (Throwable ignored) {}
     }
 }

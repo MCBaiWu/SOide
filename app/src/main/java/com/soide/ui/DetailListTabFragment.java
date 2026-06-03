@@ -32,6 +32,9 @@ public class DetailListTabFragment extends Fragment {
     public static final int KIND_RELOCATION = 5;
     public static final int KIND_STRING = 6;
     public static final int KIND_FUNCTION = 7;
+    public static final int KIND_IMPORT = 8;
+    public static final int KIND_LIBRARY = 9;
+    public static final int KIND_HASH = 10;
 
     private static final String ARG_KIND = "kind";
     private static final String ARG_ELF_PATH = "elf_path";
@@ -161,8 +164,76 @@ public class DetailListTabFragment extends Fragment {
                     }
                 }
                 break;
+            case KIND_IMPORT:
+                if (elf.imports != null) {
+                    for (com.soide.elf.ImportedFunction imp : elf.imports) {
+                        DetailAdapter.Item it = new DetailAdapter.Item();
+                        it.type = imp.relocType != null ? imp.relocType : "IMPORT";
+                        it.title = imp.name != null ? imp.name : "(unknown)";
+                        if (imp.name != null && imp.name.startsWith("_Z")) {
+                            com.soide.util.Demangler.Result dm = com.soide.util.Demangler.demangle(imp.name);
+                            if (dm.supported) it.subtitle = dm.demangled;
+                            else it.subtitle = imp.section + "  PLT 桩函数";
+                        } else {
+                            it.subtitle = imp.section + "  PLT 桩函数";
+                        }
+                        it.meta = String.format("plt=0x%x got=0x%x", imp.pltAddress, imp.gotOffset);
+                        list.add(it);
+                    }
+                }
+                break;
+            case KIND_LIBRARY:
+                if (elf.neededLibraries != null) {
+                    for (String lib : elf.neededLibraries) {
+                        DetailAdapter.Item it = new DetailAdapter.Item();
+                        it.type = "DT_NEEDED";
+                        it.title = lib;
+                        it.subtitle = "动态链接依赖";
+                        it.meta = "";
+                        list.add(it);
+                    }
+                }
+                break;
+            case KIND_HASH:
+                if (elf.gnuHash != null) {
+                    addHash(list, ".gnu.hash", "GNU", elf.gnuHash.nbucket, elf.gnuHash.maskwords,
+                            elf.gnuHash.bloomShift, elf.gnuHash.bloom != null ? elf.gnuHash.bloom.length * 8 : 0);
+                }
+                if (elf.sysvHash != null) {
+                    addHash(list, ".hash", "SysV", elf.sysvHash.nbucket, elf.sysvHash.maskwords,
+                            0, elf.sysvHash.bloom != null ? elf.sysvHash.bloom.length * 8 : 0);
+                }
+                if (elf.dynsymEntries != null) {
+                    for (int i = 0; i < elf.dynsymEntries.size(); i++) {
+                        com.soide.elf.SymbolEntry s = elf.dynsymEntries.get(i);
+                        if (s.name == null || s.name.isEmpty()) continue;
+                        long gnu = com.soide.elf.HashLookup.gnuHash(s.name);
+                        long sysv = com.soide.elf.HashLookup.sysvHash(s.name);
+                        int gnuIdx = elf.gnuHash != null ? elf.gnuHash.lookupGnu(s.name) : -1;
+                        int sysvIdx = elf.sysvHash != null ? elf.sysvHash.lookupSysV(s.name) : -1;
+                        boolean ok = (gnuIdx == i || gnuIdx < 0)
+                                && (sysvIdx == i || sysvIdx < 0);
+                        DetailAdapter.Item it = new DetailAdapter.Item();
+                        it.type = ok ? "OK" : "MISMATCH";
+                        it.title = s.name;
+                        it.subtitle = String.format("idx=%d  gnu=0x%x sysv=0x%x", i, gnu, sysv);
+                        it.meta = String.format("gnu idx=%d  sysv idx=%d", gnuIdx, sysvIdx);
+                        list.add(it);
+                    }
+                }
+                break;
         }
         return list;
+    }
+
+    private void addHash(List<DetailAdapter.Item> list, String name, String kind,
+                          int nbucket, int maskwords, int shift, int bloomBits) {
+        DetailAdapter.Item it = new DetailAdapter.Item();
+        it.type = "HASH";
+        it.title = name;
+        it.subtitle = String.format("%s  nbucket=%d  nchain=%d", kind, nbucket, maskwords);
+        it.meta = shift > 0 ? ("bloom=" + bloomBits + " bits, shift=" + shift) : "no bloom";
+        list.add(it);
     }
 
     private DetailAdapter.Item symbolItem(com.soide.elf.SymbolEntry s, String src) {

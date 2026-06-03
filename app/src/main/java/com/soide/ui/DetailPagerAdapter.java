@@ -42,6 +42,12 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
                 || (elf.dynsymEntries != null && !elf.dynsymEntries.isEmpty())) {
             titles.add(context.getString(R.string.tab_symbols));
         }
+        if (elf.imports != null && !elf.imports.isEmpty()) {
+            titles.add(context.getString(R.string.tab_imports));
+        }
+        if (elf.neededLibraries != null && !elf.neededLibraries.isEmpty()) {
+            titles.add(context.getString(R.string.tab_libraries));
+        }
         if (elf.dynamicEntries != null && !elf.dynamicEntries.isEmpty()) {
             titles.add(context.getString(R.string.tab_dynamic));
         }
@@ -53,6 +59,9 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
         }
         if (elf.functions != null && !elf.functions.isEmpty()) {
             titles.add(context.getString(R.string.tab_functions));
+        }
+        if (elf.gnuHash != null || elf.sysvHash != null) {
+            titles.add(context.getString(R.string.tab_hash));
         }
         // 最后兜底：ELF 头
         titles.add(context.getString(R.string.tab_header));
@@ -75,6 +84,12 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
         if (title.equals(context.getString(R.string.tab_symbols))) {
             return DetailListTabFragment.newInstance(DetailListTabFragment.KIND_SYMBOL, elf);
         }
+        if (title.equals(context.getString(R.string.tab_imports))) {
+            return DetailListTabFragment.newInstance(DetailListTabFragment.KIND_IMPORT, elf);
+        }
+        if (title.equals(context.getString(R.string.tab_libraries))) {
+            return DetailListTabFragment.newInstance(DetailListTabFragment.KIND_LIBRARY, elf);
+        }
         if (title.equals(context.getString(R.string.tab_dynamic))) {
             return DetailListTabFragment.newInstance(DetailListTabFragment.KIND_DYNAMIC, elf);
         }
@@ -86,6 +101,9 @@ public class DetailPagerAdapter extends FragmentStateAdapter {
         }
         if (title.equals(context.getString(R.string.tab_functions))) {
             return FuncListTabFragment.newInstance(elf);
+        }
+        if (title.equals(context.getString(R.string.tab_hash))) {
+            return DetailListTabFragment.newInstance(DetailListTabFragment.KIND_HASH, elf);
         }
         // ELF 头
         return HeaderTabFragment.newInstance(elf);

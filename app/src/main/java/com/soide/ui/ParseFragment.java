@@ -178,6 +178,8 @@ public class ParseFragment extends Fragment {
             sb.append("  •  字符串: ").append(elf.strings != null ? elf.strings.size() : 0);
             sb.append("  •  函数: ").append(elf.functions != null ? elf.functions.size() : 0);
             sb.append("  •  重定位: ").append(elf.relocations != null ? elf.relocations.size() : 0);
+            sb.append("  •  导入: ").append(elf.imports != null ? elf.imports.size() : 0);
+            sb.append("  •  依赖: ").append(elf.neededLibraries != null ? elf.neededLibraries.size() : 0);
         }
         return sb.toString();
     }
@@ -250,6 +252,26 @@ public class ParseFragment extends Fragment {
                     "name / addr / size / instructions",
                     meta,
                     "functions"));
+        }
+        if (elf.imports != null && !elf.imports.isEmpty()) {
+            list.add(new ListCardAdapter.Item(R.drawable.ic_import, "导入函数 (" + elf.imports.size() + ")",
+                    "PLT 桩函数 / 外部符号",
+                    "解析 .plt / .rela.plt",
+                    "imports"));
+        }
+        if (elf.neededLibraries != null && !elf.neededLibraries.isEmpty()) {
+            list.add(new ListCardAdapter.Item(R.drawable.ic_library, "依赖库 (" + elf.neededLibraries.size() + ")",
+                    "DT_NEEDED 动态链接依赖",
+                    String.join(", ", elf.neededLibraries.size() > 4
+                            ? new String[]{elf.neededLibraries.get(0), "..."}
+                            : new String[]{}),
+                    "libraries"));
+        }
+        if (elf.gnuHash != null || elf.sysvHash != null) {
+            list.add(new ListCardAdapter.Item(R.drawable.ic_hash, "哈希表",
+                    ".gnu.hash / .hash 交叉验证",
+                    "dynsym 符号名 → 索引",
+                    "hash"));
         }
         return list;
     }

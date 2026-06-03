@@ -1,6 +1,7 @@
 package com.soide;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.view.MenuItem;
 
 import androidx.annotation.NonNull;
@@ -18,22 +19,32 @@ import com.soide.ui.ToolsFragment;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "MainActivity";
     private static final String STATE_SELECTED = "selectedItem";
     private BottomNavigationView bottomNav;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
-        bottomNav = findViewById(R.id.bottom_navigation);
-        bottomNav.setOnItemSelectedListener(this::onNavSelected);
+        try {
+            setContentView(R.layout.activity_main);
 
-        if (savedInstanceState != null) {
-            int sel = savedInstanceState.getInt(STATE_SELECTED, R.id.nav_home);
-            bottomNav.setSelectedItemId(sel);
-        } else {
-            bottomNav.setSelectedItemId(R.id.nav_home);
+            bottomNav = findViewById(R.id.bottom_navigation);
+            if (bottomNav == null) {
+                Log.e(TAG, "bottom_navigation not found in layout");
+                return;
+            }
+            bottomNav.setOnItemSelectedListener(this::onNavSelected);
+
+            int target = R.id.nav_home;
+            if (savedInstanceState != null) {
+                int sel = savedInstanceState.getInt(STATE_SELECTED, R.id.nav_home);
+                if (sel != 0) target = sel;
+            }
+            bottomNav.setSelectedItemId(target);
+        } catch (Throwable t) {
+            Log.e(TAG, "onCreate failed", t);
         }
     }
 
@@ -46,32 +57,43 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean onNavSelected(@NonNull MenuItem item) {
-        Fragment frag = null;
-        int id = item.getItemId();
-        if (id == R.id.nav_home) {
-            frag = new HomeFragment();
-        } else if (id == R.id.nav_parse) {
-            frag = new ParseFragment();
-        } else if (id == R.id.nav_demangle) {
-            frag = new DemangleFragment();
-        } else if (id == R.id.nav_history) {
-            frag = new HistoryFragment();
-        } else if (id == R.id.nav_tools) {
-            frag = new ToolsFragment();
-        } else if (id == R.id.nav_assembler) {
-            frag = new AssemblerFragment();
-        }
-        if (frag != null) {
-            switchFragment(frag);
-            return true;
+        try {
+            Fragment frag = createFragmentForId(item.getItemId());
+            if (frag != null) {
+                switchFragment(frag);
+                return true;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "onNavSelected failed", t);
         }
         return false;
     }
 
+    private Fragment createFragmentForId(int id) {
+        if (id == R.id.nav_home) {
+            return new HomeFragment();
+        } else if (id == R.id.nav_parse) {
+            return new ParseFragment();
+        } else if (id == R.id.nav_demangle) {
+            return new DemangleFragment();
+        } else if (id == R.id.nav_history) {
+            return new HistoryFragment();
+        } else if (id == R.id.nav_tools) {
+            return new ToolsFragment();
+        } else if (id == R.id.nav_assembler) {
+            return new AssemblerFragment();
+        }
+        return null;
+    }
+
     private void switchFragment(Fragment frag) {
-        FragmentTransaction tx = getSupportFragmentManager().beginTransaction();
-        tx.setReorderingAllowed(true);
-        tx.replace(R.id.fragment_container, frag);
-        tx.commit();
+        try {
+            FragmentTransaction tx = getSupportFragmentManager().beginTransaction();
+            tx.setReorderingAllowed(true);
+            tx.replace(R.id.fragment_container, frag);
+            tx.commit();
+        } catch (Throwable t) {
+            Log.e(TAG, "switchFragment failed", t);
+        }
     }
 }

@@ -29,6 +29,9 @@
     <string name="tab_relocations">重定位</string>
     <string name="tab_strings">字符串</string>
     <string name="tab_functions">函数</string>
+    <string name="tab_imports">导入</string>
+    <string name="tab_libraries">依赖库</string>
+    <string name="tab_hash">哈希表</string>
 
     <!-- 详情页类型 -->
     <string name="kind_string">字符串</string>
