@@ -153,10 +153,10 @@ public class DetailListTabFragment extends Fragment {
                 if (elf.strings != null) {
                     for (com.soide.elf.ExtractedString s : elf.strings) {
                         DetailAdapter.Item it = new DetailAdapter.Item();
-                        it.type = s.section;
+                        it.type = s.sectionName;
                         it.title = truncate(s.value, 60);
-                        it.subtitle = s.section + "  @0x" + Long.toHexString(s.address);
-                        it.meta = "off=0x" + Long.toHexString(s.fileOffset);
+                        it.subtitle = s.sectionName + "  @0x" + Long.toHexString(s.address);
+                        it.meta = "off=0x" + Long.toHexString(s.offset);
                         list.add(it);
                     }
                 }
