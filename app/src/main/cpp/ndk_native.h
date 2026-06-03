@@ -11,7 +11,7 @@ extern "C" {
 typedef struct ndk_insn {
     uint64_t address;
     uint16_t size;          // 2 (Thumb) or 4 (ARM)
-    uint32_t bytes[2];      // 最多 8 字节
+    uint32_t bytes[4];      // 最多 8 字节（存 4 个 uint32_t，留足空间）
     char     mnemonic[16];
     char     op_str[64];
 } ndk_insn_t;

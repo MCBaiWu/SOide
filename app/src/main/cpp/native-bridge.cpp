@@ -56,6 +56,10 @@ Java_com_soide_nativebridge_NativeBridge_nativeDisasm(
     jclass objClass = env->FindClass("java/lang/Object");
     jclass strClass = env->FindClass("java/lang/String");
     jclass byteArrClass = env->FindClass("[B");
+    jclass longClass = env->FindClass("java/lang/Long");
+    jclass intClass = env->FindClass("java/lang/Integer");
+    jmethodID longInit = env->GetMethodID(longClass, "<init>", "(J)V");
+    jmethodID intInit = env->GetMethodID(intClass, "<init>", "(I)V");
 
     jobjectArray result = env->NewObjectArray((jsize) n, objClass, nullptr);
 
@@ -63,9 +67,11 @@ Java_com_soide_nativebridge_NativeBridge_nativeDisasm(
         const ndk_insn_t& ins = insns[i];
         // 构造 byte[] bytes
         int bsz = (int) ins.size;
+        if (bsz < 0) bsz = 0;
+        if (bsz > 8) bsz = 8;
         jbyteArray jbytes = env->NewByteArray(bsz);
         jbyte buf[8];
-        for (int k = 0; k < bsz && k < 8; k++) buf[k] = (jbyte) (ins.bytes[k] & 0xff);
+        for (int k = 0; k < bsz; k++) buf[k] = (jbyte) (ins.bytes[k] & 0xff);
         env->SetByteArrayRegion(jbytes, 0, bsz, buf);
 
         jstring jmn = env->NewStringUTF(ins.mnemonic);
@@ -73,10 +79,8 @@ Java_com_soide_nativebridge_NativeBridge_nativeDisasm(
 
         // Object[] = { address, size, bytes, mnemonic, opStr }
         jobjectArray row = env->NewObjectArray(5, objClass, nullptr);
-        env->SetObjectArrayElement(row, 0, env->NewObject(
-                env->FindClass("java/lang/Long"), "(J)V", (jlong) ins.address));
-        env->SetObjectArrayElement(row, 1, env->NewObject(
-                env->FindClass("java/lang/Integer"), "(I)V", (jint) ins.size));
+        env->SetObjectArrayElement(row, 0, env->NewObject(longClass, longInit, (jlong) ins.address));
+        env->SetObjectArrayElement(row, 1, env->NewObject(intClass, intInit, (jint) ins.size));
         env->SetObjectArrayElement(row, 2, jbytes);
         env->SetObjectArrayElement(row, 3, jmn);
         env->SetObjectArrayElement(row, 4, jop);
