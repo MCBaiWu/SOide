@@ -46,8 +46,90 @@ jobs:
           echo "Capstone 准备完成:"
           du -sh .
 
+      - name: Build Keystone static lib for Android (汇编真库)
+        env:
+          NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+        run: |
+          set -e
+          # Locate the NDK we just installed
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+          if [ ! -d "$NDK_DIR" ]; then
+            echo "NDK not found at $NDK_DIR"; ls -la "$ANDROID_SDK_ROOT/ndk/" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Using NDK: $NDK_DIR"
+          ls "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/" | grep -E "^clang$|^aarch64-linux-android|^armv7a-linux-androideabi" | head -10
+
+          mkdir -p app/src/main/cpp/third_party
+          cd app/src/main/cpp/third_party
+          curl -sL https://github.com/keystone-engine/keystone/archive/refs/heads/master.tar.gz -o keystone.tar.gz
+          tar xf keystone.tar.gz
+          mv keystone-master keystone
+          rm keystone.tar.gz
+
+          # Keystone needs to be cross-compiled to Android. We build it once
+          # per ABI and place the static libs under
+          #   third_party/keystone/lib/<abi>/libkeystone.a
+          # so our app CMakeLists can pick them up via $ANDROID_ABI.
+          for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
+            case "$ABI" in
+              arm64-v8a)     KS_TRIPLE="aarch64-linux-android24"   ;;
+              armeabi-v7a)   KS_TRIPLE="armv7a-linux-androideabi24" ;;
+              x86_64)        KS_TRIPLE="x86_64-linux-android24"    ;;
+              x86)           KS_TRIPLE="i686-linux-android24"      ;;
+            esac
+            echo ""
+            echo "============================================="
+            echo "Building keystone for $ABI  (triple=$KS_TRIPLE)"
+            echo "============================================="
+            rm -rf keystone/build-$ABI
+            mkdir -p keystone/build-$ABI
+            cd keystone/build-$ABI
+            cmake \
+              -DBUILD_LIBS_ONLY=1 \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DLLVM_TARGETS_TO_BUILD="ARM;AArch64" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_SYSTEM_NAME=Android \
+              -DCMAKE_SYSTEM_VERSION=24 \
+              -DCMAKE_ANDROID_ARCH_ABI=$ABI \
+              -DCMAKE_ANDROID_NDK="$NDK_DIR" \
+              -DCMAKE_ANDROID_STL_TYPE=c++_static \
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+              -DCMAKE_CXX_STANDARD=14 \
+              -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+              -DCMAKE_C_FLAGS="-w -Wno-error" \
+              -DCMAKE_CXX_FLAGS="-w -Wno-error" \
+              -G "Unix Makefiles" .. 2>&1 | tail -25
+            make -j2 keystone 2>&1 | tail -5
+            if [ ! -f llvm/lib/libkeystone.a ]; then
+              echo "ERROR: keystone.a not produced for $ABI"
+              exit 1
+            fi
+            mkdir -p ../lib/$ABI
+            cp llvm/lib/libkeystone.a ../lib/$ABI/
+            ${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-debug ../lib/$ABI/libkeystone.a 2>/dev/null || true
+            ls -la ../lib/$ABI/
+            cd ../..
+          done
+          echo ""
+          echo "Keystone libs built:"
+          find keystone/lib -name "libkeystone.a" -exec ls -la {} \;
+          # 删除源码，节省空间（只保留 .a 与 include/）
+          rm -rf keystone/llvm keystone/bindings keystone/samples keystone/suite \
+                 keystone/kstool keystone/debian keystone/docs \
+                 keystone/COMPILE* keystone/COPYING keystone/CREDITS.TXT \
+                 keystone/ChangeLog keystone/EXCEPTIONS-CLIENT keystone/LICENSE-COM.TXT \
+                 keystone/AUTHORS.TXT keystone/SPONSORS.TXT keystone/README.md \
+                 keystone/RELEASE_NOTES keystone/.NOTE keystone/.gitignore \
+                 keystone/.appveyor.yml keystone/.travis.yml \
+                 keystone/make-*.sh keystone/nmake-*.bat keystone/CMakeUninstall.in \
+                 keystone/cmake_uninstall.cmake.in keystone/cmake.sh \
+                 keystone/CMakeLists.txt keystone/pkg-config.pc.cmake
+          du -sh keystone/
+
       - run: chmod +x gradlew
-      - name: Build with NDK (capstone-engine/capstone 静态链接)
+      - name: Build with NDK (capstone + keystone 静态链接)
         run: ./gradlew assembleRelease --no-daemon -Pandroid.useAndroidX=true
 
       - name: Upload APK artifact

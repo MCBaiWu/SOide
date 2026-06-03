@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================
-# 第三方库：Capstone 反汇编引擎 (真库集成)
+# 第三方库 1: Capstone 反汇编引擎 (真库集成)
 # ============================================================
 # 集成 capstone-engine/capstone (https://github.com/capstone-engine/capstone)
 # 只启用 ARM + AArch64 架构，节省体积。
@@ -45,6 +45,24 @@ set(CAPSTONE_ARC_SUPPORT        OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/capstone EXCLUDE_FROM_ALL)
 
 # ============================================================
+# 第三方库 2: Keystone 汇编引擎 (真库集成)
+# ============================================================
+# 集成 keystone-engine/keystone (https://github.com/keystone-engine/keystone)
+# 静态库由 CI workflow 在 third_party/keystone/lib/<ABI>/libkeystone.a
+# 预构建完成（每 ABI 一次），这里直接 link 即可。
+# include 头在 third_party/keystone/include/keystone/keystone.h
+add_library(keystone STATIC IMPORTED)
+set_target_properties(keystone PROPERTIES
+    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/third_party/keystone/lib/${ANDROID_ABI}/libkeystone.a
+    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/third_party/keystone/include
+    INTERFACE_COMPILE_DEFINITIONS "KEYSTONE_STATIC=1"
+)
+# Keystone 用了 C++ 标准库，需要 c++_static
+set_target_properties(keystone PROPERTIES
+    INTERFACE_LINK_LIBRARIES "c++_static;c;dl;m;log"
+)
+
+# ============================================================
 # 本模块 native 库
 # ============================================================
 add_library(soide-native SHARED
@@ -58,5 +76,6 @@ find_library(log-lib log)
 target_link_libraries(soide-native
     PRIVATE
         capstone_static
+        keystone
         ${log-lib}
 )

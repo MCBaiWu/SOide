@@ -153,5 +153,5 @@ Java_com_soide_nativebridge_NativeBridge_nativeGnuHash(JNIEnv* env, jclass /*cla
 // ---------------------------------------------------------------
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_soide_nativebridge_NativeBridge_nativeVersion(JNIEnv* env, jclass /*clazz*/) {
-    return env->NewStringUTF("soide-native 1.3.0 (CMake/NDK; capstone/keystone-style subset)");
+    return env->NewStringUTF("soide-native 1.3.1 (capstone+keystone real libs; ARM/AArch64)");
 }
