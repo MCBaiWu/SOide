@@ -147,7 +147,7 @@ public class HomeFragment extends Fragment {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         hero.setLayoutParams(heroLp);
-        hero.setCardCornerRadius(dp(24));
+        hero.setRadius(dp(24));
         hero.setCardElevation(dp(6));
         hero.setCardBackgroundColor(Color.parseColor("#FF1A6EF0"));
         hero.setPreventCornerOverlap(true);
@@ -226,7 +226,7 @@ public class HomeFragment extends Fragment {
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         badgeLp.topMargin = dp(16);
         badge.setLayoutParams(badgeLp);
-        badge.setCardCornerRadius(dp(20));
+        badge.setRadius(dp(20));
         badge.setCardBackgroundColor(Color.parseColor("#33FFFFFF"));
         badge.setCardElevation(0);
 
@@ -258,7 +258,7 @@ public class HomeFragment extends Fragment {
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         cardLp.bottomMargin = dp(12);
         card.setLayoutParams(cardLp);
-        card.setCardCornerRadius(dp(20));
+        card.setRadius(dp(20));
         card.setCardElevation(dp(2));
         card.setCardBackgroundColor(Color.WHITE);
         card.setRippleColor(ColorStateList.valueOf(Color.parseColor("#1F" + colorHex(accent))));

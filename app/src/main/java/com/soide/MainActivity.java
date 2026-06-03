@@ -23,6 +23,7 @@ import androidx.fragment.app.FragmentTransaction;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.soide.ui.AssemblerFragment;
+import com.soide.ui.BuildConfigHelper;
 import com.soide.ui.DemangleFragment;
 import com.soide.ui.HistoryFragment;
 import com.soide.ui.HomeFragment;
