@@ -44,6 +44,8 @@ import com.soide.ui.HomeFragment;
 import com.soide.ui.ParseFragment;
 import com.soide.ui.SettingsFragment;
 import com.soide.ui.ToolsFragment;
+import com.soide.util.CacheStore;
+import com.soide.util.ThemeUtils;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -89,13 +91,21 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "onCreate start");
 
         try {
+            // 缓存版本不匹配 → 清空旧缓存（避免旧版带 bug 的反汇编结果还在）
+            try {
+                CacheStore.pruneIfStaleVersion(this);
+            } catch (Throwable t) {
+                Log.w(TAG, "pruneIfStaleVersion failed", t);
+            }
+
             // -------- 根 LinearLayout (vertical) --------
             LinearLayout root = new LinearLayout(this);
             root.setLayoutParams(new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT));
             root.setOrientation(LinearLayout.VERTICAL);
-            root.setBackgroundColor(Color.parseColor("#FFEFEFEF"));
+            // 跟随 day/night：用 ?attr/colorBackground
+            root.setBackgroundColor(ThemeUtils.colorSurface(this));
             root.setFitsSystemWindows(true);
 
             // -------- 顶部状态条 --------
@@ -104,8 +114,8 @@ public class MainActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
             statusBanner.setLayoutParams(bannerLp);
-            statusBanner.setBackgroundColor(Color.parseColor("#FF1A6EF0"));
-            statusBanner.setTextColor(Color.WHITE);
+            statusBanner.setBackgroundColor(ThemeUtils.colorPrimary(this));
+            statusBanner.setTextColor(ThemeUtils.colorOnPrimary(this));
             statusBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             statusBanner.setPadding(dp(16), dp(20), dp(16), dp(8));
             statusBanner.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -118,7 +128,7 @@ public class MainActivity extends AppCompatActivity {
             LinearLayout.LayoutParams containerLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
             fragmentContainer.setLayoutParams(containerLp);
-            fragmentContainer.setBackgroundColor(Color.WHITE);
+            fragmentContainer.setBackgroundColor(ThemeUtils.colorSurface(this));
             root.addView(fragmentContainer);
 
             // -------- 底部导航 (max 5 items) --------
@@ -127,7 +137,7 @@ public class MainActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
             bottomNav.setLayoutParams(navLp);
-            bottomNav.setBackgroundColor(Color.WHITE);
+            bottomNav.setBackgroundColor(ThemeUtils.colorSurface(this));
             bottomNav.setLabelVisibilityMode(BottomNavigationView.LABEL_VISIBILITY_LABELED);
             bottomNav.setElevation(dp(8));
 

@@ -27,6 +27,7 @@ import androidx.fragment.app.Fragment;
 import com.google.android.material.card.MaterialCardView;
 import com.soide.MainActivity;
 import com.soide.R;
+import com.soide.util.ThemeUtils;
 
 /**
  * 首页：100% 用 Java 代码构建，Material Design 3 风格。
@@ -56,7 +57,7 @@ public class HomeFragment extends Fragment {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.parseColor("#FFF7F8FB"));
+        scroll.setBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout content = new LinearLayout(ctx);
         content.setLayoutParams(new ViewGroup.LayoutParams(
@@ -73,7 +74,7 @@ public class HomeFragment extends Fragment {
             TextView sectionTitle = new TextView(ctx);
             sectionTitle.setText("主要功能");
             sectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-            sectionTitle.setTextColor(Color.parseColor("#FF1B1B1F"));
+            sectionTitle.setTextColor(ThemeUtils.colorOnSurface(ctx));
             sectionTitle.setTypeface(sectionTitle.getTypeface(), android.graphics.Typeface.BOLD);
             LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -136,7 +137,7 @@ public class HomeFragment extends Fragment {
             TextView footer = new TextView(ctx);
             footer.setText("底部导航 · 反汇编 capstone 真库 · 汇编 keystone 真库");
             footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            footer.setTextColor(Color.parseColor("#FF74777F"));
+            footer.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
             footer.setGravity(Gravity.CENTER);
             footer.setPadding(0, dp(16), 0, 0);
             content.addView(footer);
@@ -276,7 +277,7 @@ public class HomeFragment extends Fragment {
         card.setLayoutParams(cardLp);
         card.setRadius(dp(20));
         card.setCardElevation(dp(2));
-        card.setCardBackgroundColor(Color.WHITE);
+        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
         card.setRippleColor(ColorStateList.valueOf(Color.parseColor("#1F" + colorHex(accent))));
         card.setClickable(true);
         card.setFocusable(true);
@@ -323,7 +324,7 @@ public class HomeFragment extends Fragment {
         titleTv.setText(title);
         titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         titleTv.setTypeface(titleTv.getTypeface(), android.graphics.Typeface.BOLD);
-        titleTv.setTextColor(Color.parseColor("#FF1B1B1F"));
+        titleTv.setTextColor(ThemeUtils.colorOnSurface(ctx));
         textCol.addView(titleTv);
 
         TextView descTv = new TextView(ctx);
@@ -334,7 +335,7 @@ public class HomeFragment extends Fragment {
         descTv.setLayoutParams(descLp);
         descTv.setText(desc);
         descTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        descTv.setTextColor(Color.parseColor("#FF44474E"));
+        descTv.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         descTv.setLineSpacing(dp(2), 1.0f);
         textCol.addView(descTv);
 
@@ -343,7 +344,7 @@ public class HomeFragment extends Fragment {
         // 右侧箭头
         ImageView arrow = new ImageView(ctx);
         arrow.setImageResource(android.R.drawable.ic_media_play);
-        arrow.setImageTintList(ColorStateList.valueOf(Color.parseColor("#FF74777F")));
+        arrow.setImageTintList(ColorStateList.valueOf(ThemeUtils.colorOnSurfaceVariant(ctx)));
         LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(16), dp(16));
         arrowLp.leftMargin = dp(8);
         arrow.setLayoutParams(arrowLp);

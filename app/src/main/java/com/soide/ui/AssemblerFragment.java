@@ -30,6 +30,7 @@ import com.google.android.material.tabs.TabLayout;
 import com.soide.R;
 import com.soide.nativebridge.NativeBridge;
 import com.soide.util.Assembler;
+import com.soide.util.ThemeUtils;
 
 import java.util.Locale;
 
@@ -79,7 +80,7 @@ public class AssemblerFragment extends Fragment {
         android.widget.ScrollView scroll = new android.widget.ScrollView(ctx);
         scroll.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        scroll.setBackgroundColor(Color.parseColor("#FFF7F8FB"));
+        scroll.setBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout root = new LinearLayout(ctx);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -91,7 +92,7 @@ public class AssemblerFragment extends Fragment {
         title.setText("汇编 / 反汇编");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.parseColor("#FF1B1B1F"));
+        title.setTextColor(ThemeUtils.colorOnSurface(ctx));
         root.addView(title);
 
         TextView sub = new TextView(ctx);
@@ -101,7 +102,7 @@ public class AssemblerFragment extends Fragment {
         sub.setLayoutParams(subLp);
         sub.setText("capstone + keystone 真库 (NDK)  ·  ARM / Thumb / AArch64");
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        sub.setTextColor(Color.parseColor("#FF74777F"));
+        sub.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         root.addView(sub);
 
         // 顶层 mode tabs
@@ -135,7 +136,7 @@ public class AssemblerFragment extends Fragment {
         inputCard.setLayoutParams(icLp);
         inputCard.setRadius(dp(20));
         inputCard.setCardElevation(dp(2));
-        inputCard.setCardBackgroundColor(Color.WHITE);
+        inputCard.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout inputInner = new LinearLayout(ctx);
         inputInner.setOrientation(LinearLayout.VERTICAL);
@@ -145,7 +146,7 @@ public class AssemblerFragment extends Fragment {
         inputLabel.setText("汇编指令");
         inputLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         inputLabel.setTypeface(Typeface.DEFAULT_BOLD);
-        inputLabel.setTextColor(Color.parseColor("#FF1B1B1F"));
+        inputLabel.setTextColor(ThemeUtils.colorOnSurface(ctx));
         inputInner.addView(inputLabel);
 
         inputHint = new TextView(ctx);
@@ -155,7 +156,7 @@ public class AssemblerFragment extends Fragment {
         inputHint.setLayoutParams(ihLp);
         inputHint.setText("例如: mov r0, #1");
         inputHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        inputHint.setTextColor(Color.parseColor("#FF74777F"));
+        inputHint.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
         inputInner.addView(inputHint);
 
         input = new EditText(ctx);
@@ -167,9 +168,9 @@ public class AssemblerFragment extends Fragment {
         input.setMaxLines(4);
         input.setTypeface(Typeface.MONOSPACE);
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        input.setBackgroundColor(Color.parseColor("#FFF1F2F4"));
+        input.setBackgroundColor(ThemeUtils.colorSurfaceVariant(ctx));
         input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        input.setTextColor(Color.parseColor("#FF202125"));
+        input.setTextColor(ThemeUtils.colorOnSurface(ctx));
         input.setHint("mov r0, r1");
         input.setSingleLine(false);
         inputInner.addView(input);
@@ -186,7 +187,7 @@ public class AssemblerFragment extends Fragment {
         actionBtn.setCornerRadius(dp(16));
         actionBtn.setText("汇编");
         actionBtn.setBackgroundTintList(ColorStateList.valueOf(
-                Color.parseColor("#FF1A6EF0")));
+                ThemeUtils.colorPrimary(ctx)));
         root.addView(actionBtn);
 
         // 结果卡片
@@ -197,7 +198,7 @@ public class AssemblerFragment extends Fragment {
         resultCard.setLayoutParams(rcLp);
         resultCard.setRadius(dp(20));
         resultCard.setCardElevation(dp(2));
-        resultCard.setCardBackgroundColor(Color.WHITE);
+        resultCard.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         LinearLayout resultInner = new LinearLayout(ctx);
         resultInner.setOrientation(LinearLayout.VERTICAL);
@@ -207,7 +208,7 @@ public class AssemblerFragment extends Fragment {
         resultTitle.setText("结果");
         resultTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         resultTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        resultTitle.setTextColor(Color.parseColor("#FF1B1B1F"));
+        resultTitle.setTextColor(ThemeUtils.colorOnSurface(ctx));
         resultInner.addView(resultTitle);
 
         resultText = new TextView(ctx);
@@ -217,7 +218,7 @@ public class AssemblerFragment extends Fragment {
         resultText.setLayoutParams(rtLp);
         resultText.setTypeface(Typeface.MONOSPACE);
         resultText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        resultText.setTextColor(Color.parseColor("#FF202125"));
+        resultText.setTextColor(ThemeUtils.colorOnSurface(ctx));
         resultText.setLineSpacing(dp(1), 1.0f);
         resultText.setTextIsSelectable(true);
         resultText.setText("—");
@@ -237,9 +238,10 @@ public class AssemblerFragment extends Fragment {
                 ? "✓ NDK loaded: " + NativeBridge.getVersion()
                 : "✗ NDK not loaded, fallback to Java";
         nativeStatus.setText(n);
+        // 成功绿色 / 失败用主题 error 色
         nativeStatus.setTextColor(NativeBridge.isSupported()
                 ? Color.parseColor("#FF006A60")
-                : Color.parseColor("#FFBA1A1A"));
+                : ThemeUtils.colorError(ctx));
         root.addView(nativeStatus);
 
         // ===== 事件 =====
