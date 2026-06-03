@@ -44,8 +44,8 @@ public class HomeFragment extends Fragment {
 
     private void navigate(int id) {
         if (getActivity() instanceof MainActivity) {
-            ((MainActivity) getActivity()).findViewById(R.id.bottom_navigation)
-                    .setSelectedItemId(id);
+            BottomNavigationView nav = ((MainActivity) getActivity()).findViewById(R.id.bottom_navigation);
+            if (nav != null) nav.setSelectedItemId(id);
         }
     }
 }
