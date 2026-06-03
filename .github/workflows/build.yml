@@ -40,13 +40,16 @@ jobs:
                   *) rm -rf "$d" ;;
               esac
           done
-          # 移除不必要的目录与文件
+          # 移除不必要的目录与文件（保留 suite/fuzz/ 因为 capstone CMakeLists.txt 引用）
           rm -rf tests docs cstool bindings windowsce msvc xcode windows \
                  cross_configs CMakePresets.json COMPILE.MS* \
                  COMPILE_MAKE.TXT CONTRIB* CREDITS* SPONSORS* \
                  CPackConfig.cmake CPackConfig.txt functions.mk make.sh \
-                 pkgconfig.mk config.mk cppext packages suite fuzz \
+                 pkgconfig.mk config.mk cppext packages \
                  ext_patches contrib Makefile README.md BUILDING.md LICENSES
+          # 在 CMakeLists.txt 中禁用 fuzz_disasm 目标（我们不需要它）
+          sed -i '/^add_executable(fuzz_disasm /d' CMakeLists.txt
+          sed -i '/^target_link_libraries(fuzz_disasm /d' CMakeLists.txt
           echo "Capstone 准备完成:"
           du -sh .
 
