@@ -42,7 +42,27 @@ public class MainActivity extends AppCompatActivity {
                 int sel = savedInstanceState.getInt(STATE_SELECTED, R.id.nav_home);
                 if (sel != 0) target = sel;
             }
-            bottomNav.setSelectedItemId(target);
+
+            // 关键修复：BottomNavigationView 在菜单加载完后，"第一项"已经默认
+            // 处于 checked 状态。如果直接调用 setSelectedItemId(firstItemId)，
+            // 由于状态没有变化，OnItemSelectedListener 不会被触发，导致
+            // fragment_container 始终是空白。这里用 performClick + 显式
+            // switchFragment 兜底，保证首屏一定会有 fragment 渲染出来。
+            try {
+                MenuItem targetItem = bottomNav.getMenu().findItem(target);
+                if (targetItem != null && targetItem.isCheckable() && !targetItem.isChecked()) {
+                    bottomNav.setSelectedItemId(target);
+                } else {
+                    // 默认项或状态一致时，listener 不会触发 → 手动加载 fragment
+                    Fragment initial = createFragmentForId(target);
+                    if (initial != null) {
+                        switchFragment(initial);
+                        if (targetItem != null) targetItem.setChecked(true);
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "initial fragment load failed", t);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "onCreate failed", t);
         }
