@@ -22,6 +22,8 @@ public class ElfParser {
     private ByteOrder byteOrder;
     private boolean is64Bit;
     private ElfFile elfFile;
+    private SectionHeader dynsymSec;        // 用于解析重定位的符号名
+    private List<SymbolEntry> dynsymForRel; // dynsym 符号列表
 
     public ElfFile parse(File file) throws IOException {
         elfFile = new ElfFile();
@@ -38,6 +40,9 @@ public class ElfParser {
         parseHeader();
         parseProgramHeaders();
         parseSectionHeaders();
+        parseRelocations();
+        extractStrings();
+        parseFunctions();
 
         return elfFile;
     }
@@ -94,8 +99,6 @@ public class ElfParser {
         ElfHeader h = elfFile.header;
         List<ProgramHeader> list = new ArrayList<>();
 
-        String interp = null;
-
         for (int i = 0; i < h.ePhnum; i++) {
             long offset = h.ePhoff + (long) i * h.ePhentsize;
             ByteBuffer buf = ByteBuffer.wrap(data).order(byteOrder);
@@ -123,12 +126,6 @@ public class ElfParser {
                 ph.pAlign = buf.getInt() & 0xffffffffL;
             }
 
-            // 读取 INTERP 段内容（解释器路径）
-            if (ph.pType == ElfConstants.PT_INTERP && ph.pFilesz > 0) {
-                int len = (int) Math.min(ph.pFilesz, 256);
-                interp = new String(data, (int) ph.pOffset, len).trim();
-            }
-
             list.add(ph);
         }
 
@@ -139,7 +136,6 @@ public class ElfParser {
         ElfHeader h = elfFile.header;
         List<SectionHeader> list = new ArrayList<>();
 
-        // 首先读取所有节区头
         for (int i = 0; i < h.eShnum; i++) {
             long offset = h.eShoff + (long) i * h.eShentsize;
             ByteBuffer buf = ByteBuffer.wrap(data).order(byteOrder);
@@ -173,7 +169,6 @@ public class ElfParser {
             list.add(sh);
         }
 
-        // 解析节区名字符串表
         String shstrtab = null;
         int shstrndx = h.eShstrndx;
         if (shstrndx > 0 && shstrndx < list.size()) {
@@ -181,7 +176,6 @@ public class ElfParser {
             shstrtab = readString(shstrSec.shOffset, (int) shstrSec.shSize);
         }
 
-        // 填回节区名
         for (SectionHeader sh : list) {
             if (shstrtab != null && sh.shName > 0 && sh.shName < shstrtab.length()) {
                 int end = shstrtab.indexOf('\0', sh.shName);
@@ -192,7 +186,6 @@ public class ElfParser {
 
         elfFile.sectionHeaders = list;
 
-        // 解析符号表和动态段
         parseSymbolTables();
         parseDynamic();
     }
@@ -201,7 +194,6 @@ public class ElfParser {
         Map<Long, String> dynstrMap = new HashMap<>();
         String dynstr = null;
 
-        // 先找出 .dynstr
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (".dynstr".equals(sh.name)) {
                 dynstr = readString(sh.shOffset, (int) sh.shSize);
@@ -209,12 +201,13 @@ public class ElfParser {
             }
         }
 
-        // 解析各节区
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (sh.shType == ElfConstants.SHT_SYMTAB) {
                 elfFile.symtabEntries = parseSymbols(sh, null);
             } else if (sh.shType == ElfConstants.SHT_DYNSYM) {
-                elfFile.dynsymEntries = parseSymbols(sh, dynstr);
+                dynsymSec = sh;
+                dynsymForRel = parseSymbols(sh, dynstr);
+                elfFile.dynsymEntries = dynsymForRel;
             }
         }
     }
@@ -246,7 +239,6 @@ public class ElfParser {
                 se.stShndx = buf.getShort() & 0xffff;
             }
 
-            // 从字符串表获取符号名
             if (strtab != null && se.stName > 0 && se.stName < strtab.length()) {
                 int end = strtab.indexOf('\0', se.stName);
                 if (end < 0) end = strtab.length();
@@ -260,7 +252,6 @@ public class ElfParser {
     }
 
     private void parseDynamic() {
-        // 找到 .dynamic 节区
         SectionHeader dynamicSec = null;
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (sh.shType == ElfConstants.SHT_DYNAMIC) {
@@ -269,7 +260,6 @@ public class ElfParser {
             }
         }
 
-        // 也检查程序头中的 DYNAMIC 段
         if (dynamicSec == null) {
             for (ProgramHeader ph : elfFile.programHeaders) {
                 if (ph.pType == ElfConstants.PT_DYNAMIC) {
@@ -283,7 +273,6 @@ public class ElfParser {
 
         if (dynamicSec == null) return;
 
-        // 找到 .dynstr
         String dynstr = null;
         long dynstrAddr = 0;
         for (SectionHeader sh : elfFile.sectionHeaders) {
@@ -318,7 +307,6 @@ public class ElfParser {
                 break;
             }
 
-            // 记录 STRTAB 基址，用于后续名字解析
             if (de.dTag == ElfConstants.DT_STRTAB) {
                 dynstrBase = de.dVal;
             }
@@ -326,19 +314,13 @@ public class ElfParser {
             entries.add(de);
         }
 
-        // 解析动态字符串（NEEDED, SONAME 等）
         if (dynstrBase != 0) {
             for (DynamicEntry de : entries) {
-                long strOff = 0;
                 if (de.dTag == ElfConstants.DT_NEEDED || de.dTag == ElfConstants.DT_SONAME) {
                     long actualOffset = de.dVal;
 
-                    // 尝试通过偏移直接读 .dynstr
                     if (dynstr != null) {
-                        // dVal 是相对于文件加载基址 - 需要用 .dynstr 的 addr 来修正
-                        // 简单场景：dVal 就是字符串在 .dynstr 节中的偏移
                         long stroff = actualOffset;
-                        // 如果 dVal 是虚拟地址，尝试减去 dynstr 的虚拟基址
                         if (dynstrAddr > 0 && stroff > dynstrAddr) {
                             stroff -= dynstrAddr;
                         }
@@ -361,13 +343,207 @@ public class ElfParser {
         elfFile.neededLibraries = needed;
     }
 
+    /**
+     * 解析重定位表（.rel / .rela）
+     */
+    private void parseRelocations() {
+        List<RelocationEntry> all = new ArrayList<>();
+        String dynstr = null;
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (".dynstr".equals(sh.name)) {
+                dynstr = readString(sh.shOffset, (int) sh.shSize);
+                break;
+            }
+        }
+
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            if (sh.shType == ElfConstants.SHT_REL || sh.shType == ElfConstants.SHT_RELA) {
+                parseRelocationSection(sh, dynstr, all);
+            }
+        }
+
+        elfFile.relocations = all;
+    }
+
+    private void parseRelocationSection(SectionHeader sh, String dynstr, List<RelocationEntry> out) {
+        int entrySize = (int) sh.shEntsize;
+        if (entrySize <= 0) return;
+
+        for (long off = sh.shOffset; off < sh.shOffset + sh.shSize; off += entrySize) {
+            ByteBuffer buf = ByteBuffer.wrap(data).order(byteOrder);
+            buf.position((int) off);
+
+            RelocationEntry re = new RelocationEntry();
+            if (is64Bit) {
+                re.rOffset = buf.getLong();
+                re.rInfo = buf.getLong();
+                if (sh.shType == ElfConstants.SHT_RELA) {
+                    re.rAddend = buf.getLong();
+                }
+            } else {
+                re.rOffset = buf.getInt() & 0xffffffffL;
+                re.rInfo = buf.getInt() & 0xffffffffL;
+                if (sh.shType == ElfConstants.SHT_RELA) {
+                    re.rAddend = buf.getInt() & 0xffffffffL;
+                }
+            }
+
+            re.typeName = getRelocationTypeName(elfFile.header.eMachine, re.getType(is64Bit));
+            re.symbolIndex = re.getSymbolIndex(is64Bit);
+
+            if (dynsymForRel != null && re.symbolIndex > 0 && re.symbolIndex < dynsymForRel.size()) {
+                SymbolEntry sym = dynsymForRel.get(re.symbolIndex);
+                re.symbolName = sym.name;
+            }
+            if (re.symbolName == null && dynstr != null) {
+                // 尝试用 rInfo 当作 dynstr 偏移（极少情况）
+                re.symbolName = "";
+            }
+
+            out.add(re);
+        }
+    }
+
+    private String getRelocationTypeName(int machine, int type) {
+        if (machine == ElfConstants.EM_X86_64) {
+            switch (type) {
+                case 6: return "R_X86_64_64";
+                case 7: return "R_X86_64_GLOB_DAT";
+                case 8: return "R_X86_64_JUMP_SLOT";
+                case 9: return "R_X86_64_RELATIVE";
+                case 23: return "R_X86_64_IRELATIVE";
+                case 26: return "R_X86_64_COPY";
+                default: return String.format("R_X86_64_%d", type);
+            }
+        } else if (machine == ElfConstants.EM_386) {
+            switch (type) {
+                case 1: return "R_386_32";
+                case 2: return "R_386_PC32";
+                case 6: return "R_386_GLOB_DAT";
+                case 7: return "R_386_JUMP_SLOT";
+                case 8: return "R_386_RELATIVE";
+                default: return String.format("R_386_%d", type);
+            }
+        } else if (machine == ElfConstants.EM_AARCH64) {
+            switch (type) {
+                case 257: return "R_AARCH64_ABS64";
+                case 258: return "R_AARCH64_ABS32";
+                case 1024: return "R_AARCH64_GLOB_DAT";
+                case 1026: return "R_AARCH64_JUMP_SLOT";
+                case 1027: return "R_AARCH64_RELATIVE";
+                case 1028: return "R_AARCH64_IRELATIVE";
+                default: return String.format("R_AARCH64_%d", type);
+            }
+        } else if (machine == ElfConstants.EM_ARM) {
+            switch (type) {
+                case 2: return "R_ARM_ABS32";
+                case 21: return "R_ARM_GLOB_DAT";
+                case 22: return "R_ARM_JUMP_SLOT";
+                case 23: return "R_ARM_RELATIVE";
+                default: return String.format("R_ARM_%d", type);
+            }
+        }
+        return String.format("REL_%d", type);
+    }
+
+    /**
+     * 从节区中提取可打印的字符串（最小长度 4）
+     */
+    private void extractStrings() {
+        List<ExtractedString> list = new ArrayList<>();
+        int minLen = 4;
+
+        for (SectionHeader sh : elfFile.sectionHeaders) {
+            // 只在数据型节区里提取字符串
+            if (sh.shType != ElfConstants.SHT_PROGBITS && sh.shType != ElfConstants.SHT_STRTAB) {
+                continue;
+            }
+            if (sh.name != null && sh.name.startsWith(".rela")) continue;
+            if (sh.name != null && sh.name.startsWith(".rel")) continue;
+            if (sh.name != null && sh.name.equals(".eh_frame")) continue;
+
+            int start = (int) sh.shOffset;
+            int end = (int) Math.min(sh.shOffset + sh.shSize, data.length);
+            if (start >= end) continue;
+
+            int strStart = -1;
+            for (int i = start; i < end; i++) {
+                byte b = data[i];
+                if (b >= 0x20 && b < 0x7f) {
+                    if (strStart < 0) strStart = i;
+                } else if (b == 0) {
+                    if (strStart >= 0) {
+                        int len = i - strStart;
+                        if (len >= minLen) {
+                            String s = new String(data, strStart, len, java.nio.charset.StandardCharsets.UTF_8);
+                            long address = sh.shAddr + (strStart - sh.shOffset);
+                            list.add(new ExtractedString(strStart, address, s, sh.name != null ? sh.name : ""));
+                        }
+                        strStart = -1;
+                    }
+                } else {
+                    strStart = -1;
+                }
+            }
+        }
+
+        elfFile.strings = list;
+    }
+
+    /**
+     * 解析函数（来自 .symtab / .dynsym，类型为 FUNC 且尺寸 > 0），并反汇编
+     */
+    private void parseFunctions() {
+        List<FunctionInfo> funcs = new ArrayList<>();
+        List<SymbolEntry> sources = new ArrayList<>();
+        if (elfFile.symtabEntries != null) sources.addAll(elfFile.symtabEntries);
+        if (elfFile.dynsymEntries != null) sources.addAll(elfFile.dynsymEntries);
+
+        Disassembler disasm = new Disassembler(elfFile.header.eMachine, is64Bit);
+
+        for (SymbolEntry se : sources) {
+            if (se.getType() != ElfConstants.STT_FUNC) continue;
+            if (se.stSize <= 0) continue;
+            if (se.name == null || se.name.isEmpty()) continue;
+            if (se.name.startsWith("$")) continue; // 跳过编译器内部符号
+            if (se.name.startsWith("__")) continue; // 跳过程序集辅助符号
+
+            // 找到所属节区
+            SectionHeader funcSec = null;
+            if (se.stShndx > 0 && se.stShndx < elfFile.sectionHeaders.size()) {
+                SectionHeader candidate = elfFile.sectionHeaders.get(se.stShndx);
+                if (candidate.shType != ElfConstants.SHT_NOBITS
+                        && se.stValue >= candidate.shAddr
+                        && se.stValue + se.stSize <= candidate.shAddr + candidate.shSize) {
+                    funcSec = candidate;
+                }
+            }
+            if (funcSec == null) continue;
+
+            // 限制最大函数大小（防止反汇编卡死）
+            long size = Math.min(se.stSize, 8 * 1024);
+
+            long fileOff = funcSec.shOffset + (se.stValue - funcSec.shAddr);
+            if (fileOff < 0 || fileOff + size > data.length) continue;
+
+            byte[] code = Arrays.copyOfRange(data, (int) fileOff, (int) (fileOff + size));
+            List<DisassembledInstruction> insns = disasm.disassemble(code, se.stValue);
+
+            FunctionInfo fi = new FunctionInfo(se.name, se.stValue, se.stSize,
+                    funcSec.name != null ? funcSec.name : "");
+            fi.instructions = insns;
+            funcs.add(fi);
+        }
+
+        elfFile.functions = funcs;
+    }
+
     private String readString(long offset, int maxLen) {
         int start = (int) offset;
         int end = start + maxLen;
         if (start >= data.length) return null;
         if (end > data.length) end = data.length;
 
-        // 找第一个 \0 作为字符串终止
         int term = start;
         while (term < end && data[term] != 0) term++;
 

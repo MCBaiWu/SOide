@@ -13,22 +13,30 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
+import com.google.android.material.tabs.TabLayout;
+import com.google.android.material.tabs.TabLayoutMediator;
 import com.google.android.material.textview.MaterialTextView;
 import com.soide.elf.ElfFile;
 import com.soide.elf.ElfParser;
+import com.soide.ui.ParsePagerAdapter;
+import com.soide.ui.ParseResultHolder;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+
+import androidx.viewpager2.widget.ViewPager2;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final int BUFFER_SIZE = 4096;
 
     private MaterialTextView tvFilePath;
-    private MaterialTextView tvResult;
     private MaterialButton btnSelectFile;
     private LinearProgressIndicator progressBar;
+    private ViewPager2 viewPager;
+    private TabLayout tabLayout;
+    private ParsePagerAdapter pagerAdapter;
 
     private final ActivityResultLauncher<Intent> filePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
@@ -46,11 +54,19 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         tvFilePath = findViewById(R.id.tv_file_path);
-        tvResult = findViewById(R.id.tv_result);
         btnSelectFile = findViewById(R.id.btn_select_file);
         progressBar = findViewById(R.id.progress_bar);
+        viewPager = findViewById(R.id.view_pager);
+        tabLayout = findViewById(R.id.tab_layout);
 
         btnSelectFile.setOnClickListener(v -> openFilePicker());
+
+        // 初始化为空 Adapter（避免没文件时 ViewPager 为空）
+        pagerAdapter = new ParsePagerAdapter(this, null);
+        viewPager.setAdapter(pagerAdapter);
+        new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
+            tab.setText(pagerAdapter.getTabTitle(position));
+        }).attach();
     }
 
     private void openFilePicker() {
@@ -63,33 +79,34 @@ public class MainActivity extends AppCompatActivity {
     private void handleSelectedFile(Uri uri) {
         String fileName = getFileName(uri);
         tvFilePath.setText(fileName);
-        tvResult.setText("");
         showProgress(true);
 
         new Thread(() -> {
+            File tempFile = null;
             try {
-                File tempFile = copyToTempFile(uri);
-
+                tempFile = copyToTempFile(uri);
                 ElfParser parser = new ElfParser();
                 ElfFile elfFile = parser.parse(tempFile);
 
-                String result = elfFile.toString();
+                ParseResultHolder.set(elfFile);
 
                 runOnUiThread(() -> {
-                    tvResult.setText(result);
+                    pagerAdapter = new ParsePagerAdapter(this, elfFile);
+                    viewPager.setAdapter(pagerAdapter);
+                    new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
+                        tab.setText(pagerAdapter.getTabTitle(position));
+                    }).attach();
                     showProgress(false);
                     Toast.makeText(this, R.string.parse_success, Toast.LENGTH_SHORT).show();
                 });
-
-                tempFile.delete();
-
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     showProgress(false);
-                    String errorMsg = getString(R.string.parse_failed) + ": " + e.getMessage();
-                    tvResult.setText(errorMsg);
                     Toast.makeText(this, R.string.parse_failed, Toast.LENGTH_SHORT).show();
+                    tvFilePath.setText(getString(R.string.parse_failed) + ": " + e.getMessage());
                 });
+            } finally {
+                if (tempFile != null) tempFile.delete();
             }
         }).start();
     }
