@@ -1,29 +1,35 @@
 package com.soide.elf.pseudoc;
 
+import com.soide.elf.ControlFlowAnalyzer;
 import com.soide.elf.DisassembledInstruction;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * 简易伪 C 转换器。
  * <p>
- * 当前实现：
- * 1. 识别函数头 / 尾 (push/pop/ret/bx lr)
- * 2. 把常见助记符翻译成类 C 语句
- * 3. 跳转指令翻译成 if / goto
- * 4. 函数调用翻译成 &quot;func(args)&quot;
+ * v1.4.3 改进：
+ * - 用 {@link ControlFlowAnalyzer} 构建 BB，先给每个块起始打 label，
+ *   跳转指令翻译成 {@code if (cond) goto L_X;}
+ * - 修正 bx/ret/push/pop 等常见指令
+ * - 支持 ARM64 全套 b.* + cbz/cbnz/tbz/tbnz
+ * - 函数调用优先用 symbols / imports 解析成具名函数
  * <p>
- * 这是一个简单易扩展的基线实现，方便以后替换。
+ * 仍是简单实现，留出 {@link PseudoCConverter} 接口方便以后替换。
  */
 public class SimplePseudoC implements PseudoCConverter {
 
     private static final Set<String> CALL_MNEMONICS = Set.of(
-            "bl", "blx", "b.le", // ARM/AArch64
-            "call", // x86
-            "jal", "jalr", "call" // RISC-V / MIPS
+            "bl", "blx", "call", "jal", "jalr"
+    );
+
+    private static final Set<String> RET_MNEMONICS = Set.of(
+            "ret"
     );
 
     @Override
@@ -40,116 +46,173 @@ public class SimplePseudoC implements PseudoCConverter {
         }
 
         // 1) 函数签名
-        StringBuilder sig = new StringBuilder();
-        sig.append("void ").append(ctx.functionName != null ? ctx.functionName : "sub_" + Long.toHexString(ctx.functionAddress))
-                .append("() {");
-        out.add(sig.toString());
+        String fname = ctx.functionName != null && !ctx.functionName.isEmpty()
+                ? ctx.functionName
+                : ("sub_" + Long.toHexString(ctx.functionAddress));
+        out.add("void " + fname + "() {");
         out.add("    // size=" + ctx.functionSize
                 + (ctx.isThumb ? "  [Thumb]" : "")
                 + "  insn=" + ctx.instructions.size());
 
-        // 2) 简单的指令模式
-        int indent = 1;
+        // 2) 构建 CFG → 给每块打 label
+        ControlFlowAnalyzer.CFG cfg = ControlFlowAnalyzer.build(ctx.instructions);
+        Map<Long, String> blockLabel = new HashMap<>();
+        int idx = 0;
+        for (var b : cfg.blocks) {
+            blockLabel.put(b.startAddr, "L_" + Integer.toHexString(idx++));
+        }
+
+        // 3) 输出：每行指令
+        Map<Long, DisassembledInstruction> byAddr = new HashMap<>();
+        for (var i : ctx.instructions) byAddr.put(i.address, i);
+
+        boolean atBlockStart = true;
         for (DisassembledInstruction ins : ctx.instructions) {
-            String line = transformOne(ins, ctx, indent);
-            out.add(line);
+            // 如果是某块的开始，打 label
+            String lbl = blockLabel.get(ins.address);
+            if (lbl != null && atBlockStart) {
+                out.add(lbl + ":");
+            }
+            out.add("    " + transformOne(ins, ctx, blockLabel));
+            atBlockStart = lbl != null;  // 下条紧跟在 label 后也是块开始
         }
 
         out.add("}");
         return out;
     }
 
-    private String transformOne(DisassembledInstruction ins, PseudoCContext ctx, int indent) {
-        String pad = repeat("    ", indent);
+    private String transformOne(DisassembledInstruction ins, PseudoCContext ctx,
+                                Map<Long, String> blockLabel) {
         String mn = ins.mnemonic == null ? "" : ins.mnemonic.toLowerCase(Locale.ROOT);
         String op = ins.opStr == null ? "" : ins.opStr.trim();
 
-        if (mn.equals("ret") || mn.equals("bx") && op.equals("lr")) {
-            return pad + "return;";
+        if (RET_MNEMONICS.contains(mn)) {
+            return "return;";
         }
-        if (mn.equals("bl") || mn.equals("blx") || mn.equals("call") || mn.equals("jal") || mn.equals("jalr")) {
-            String target = extractFirstAddress(op);
-            if (target != null && ctx.labels != null && ctx.labels.containsKey(parseAddr(target))) {
-                return pad + ctx.labels.get(parseAddr(target)) + "();";
-            }
-            if (target != null && ctx.imports != null && ctx.imports.containsKey(parseAddr(target))) {
-                return pad + ctx.imports.get(parseAddr(target)) + "();";
-            }
-            if (target != null) {
-                return pad + "call_" + target + "();";
-            }
-            return pad + "// call " + op;
+        if (mn.equals("bx")) {
+            // bx lr / bx x30
+            if (op.equals("lr") || op.equals("x30")) return "return;";
         }
-        if (mn.equals("b") || mn.equals("b.eq") || mn.equals("b.ne")
-                || mn.equals("b.gt") || mn.equals("b.lt") || mn.equals("b.ge") || mn.equals("b.le")
-                || mn.equals("beq") || mn.equals("bne") || mn.equals("bgt") || mn.equals("blt")
-                || mn.equals("bge") || mn.equals("ble") || mn.equals("bhi") || mn.equals("blo")
-                || mn.equals("bhs") || mn.equals("bls")
-                || mn.equals("b.cc") || mn.equals("b.cs") || mn.equals("b.mi") || mn.equals("b.pl")
-                || mn.equals("b.vs") || mn.equals("b.vc")) {
+        if (CALL_MNEMONICS.contains(mn)) {
+            return "    " + callOp(op, ctx) + ";";
+        }
+        if (mn.equals("b") || mn.equals("br")) {
+            return branchLine("uncond", op, blockLabel, "");
+        }
+        if (mn.startsWith("b.") || isArmCondBranch(mn)) {
             String cond = branchCondition(mn);
-            String label = branchLabel(op, ctx);
-            if (cond.isEmpty()) {
-                return pad + "goto " + label + ";";
-            } else {
-                return pad + "if (" + cond + ") goto " + label + ";";
-            }
+            return branchLine("cond", op, blockLabel, cond);
         }
-        if (mn.startsWith("cbz") || mn.startsWith("cbnz")) {
-            return pad + "if (" + op.replace(",", " == 0) goto ") + ";";
+        if (mn.startsWith("cbz") || mn.startsWith("cbnz")
+                || mn.startsWith("tbz") || mn.startsWith("tbnz")) {
+            return cbLine(mn, op, blockLabel);
         }
         if (mn.equals("push")) {
-            return pad + "// push " + op;
+            return "// push " + op;
         }
         if (mn.equals("pop")) {
-            return pad + "// pop " + op;
+            return "// pop " + op;
         }
-        if (mn.equals("mov") || mn.equals("movz") || mn.equals("movk") || mn.equals("movn") || mn.equals("mvn") || mn.equals("mov.w")) {
-            return pad + op + ";";
+        if (mn.equals("mov") || mn.startsWith("mov") || mn.equals("mvn")
+                || mn.equals("movz") || mn.equals("movk") || mn.equals("movn")
+                || mn.equals("mov.w")) {
+            return op + ";";
         }
-        if (mn.startsWith("ldr") || mn.startsWith("str")) {
-            return pad + op + "; // mem";
+        if (mn.startsWith("ldr") || mn.startsWith("str") || mn.startsWith("ldp") || mn.startsWith("stp")) {
+            return op + ";  // mem";
         }
         if (mn.equals("nop")) {
-            return pad + "// nop";
+            return "// nop";
         }
-        // 默认：直接打印原指令
-        return pad + (ins.mnemonic != null ? ins.mnemonic : "?") + " " + (ins.opStr != null ? ins.opStr : "") + ";";
+        if (mn.equals("add") || mn.equals("sub") || mn.equals("mul") || mn.equals("div")
+                || mn.equals("and") || mn.equals("orr") || mn.equals("eor") || mn.equals("lsl")
+                || mn.equals("lsr") || mn.equals("asr") || mn.equals("cmp") || mn.equals("tst")) {
+            return op + ";";
+        }
+        if (mn.equals("svc") || mn.equals("brk") || mn.equals("hvc") || mn.equals("smc")
+                || mn.equals("syscall")) {
+            return "// syscall " + op;
+        }
+        // 默认：原样输出
+        return (ins.mnemonic != null ? ins.mnemonic : "?")
+                + (ins.opStr != null ? " " + ins.opStr : "") + ";";
     }
 
-    private static String repeat(String s, int n) {
-        StringBuilder b = new StringBuilder();
-        for (int i = 0; i < n; i++) b.append(s);
-        return b.toString();
+    private static String callOp(String op, PseudoCContext ctx) {
+        if (op == null) return "call ?()";
+        Long addr = tryParseAddr(op);
+        if (addr != null) {
+            if (ctx.imports != null && ctx.imports.containsKey(addr)) {
+                return ctx.imports.get(addr) + "()";
+            }
+            if (ctx.labels != null && ctx.labels.containsKey(addr)) {
+                return ctx.labels.get(addr) + "()";
+            }
+            return "call_0x" + Long.toHexString(addr) + "()";
+        }
+        // 寄存器间调用 (e.g. blr x8) - 没法解析
+        if (op.startsWith("x") || op.startsWith("w")) {
+            return "call " + op + "()  // indirect";
+        }
+        return "call " + op + "()";
+    }
+
+    private static String branchLine(String kind, String op, Map<Long, String> blockLabel, String cond) {
+        String lbl = labelFor(op, blockLabel);
+        if (cond == null || cond.isEmpty()) {
+            return "goto " + lbl + ";";
+        }
+        return "if (" + cond + ") goto " + lbl + ";";
+    }
+
+    private static String cbLine(String mn, String op, Map<Long, String> blockLabel) {
+        // op e.g. "x0, #0x1234" or "w8, #0x5678"
+        if (op == null || op.isEmpty()) return "// " + mn;
+        String[] parts = op.split(",");
+        if (parts.length < 2) return "// " + mn + " " + op;
+        String reg = parts[0].trim();
+        String tgt = parts[1].trim();
+        String lbl = labelFor(tgt, blockLabel);
+        boolean isZero = mn.startsWith("cbz") || mn.equals("tbz");
+        String op_ = isZero ? " == 0" : " != 0";
+        return "if (" + reg + op_ + ") goto " + lbl + ";";
+    }
+
+    private static String labelFor(String op, Map<Long, String> blockLabel) {
+        if (op == null) return "?";
+        Long addr = tryParseAddr(op);
+        if (addr != null && blockLabel != null && blockLabel.containsKey(addr)) {
+            return blockLabel.get(addr);
+        }
+        return "L_0x" + (op.startsWith("0x") || op.startsWith("0X") ? op.substring(2) : op);
     }
 
     private static String branchCondition(String mn) {
+        // ARM64: b.eq/b.ne/b.gt/.../b.hi/b.lo
+        // ARM : beq/bne/...
         switch (mn) {
-            case "beq": case "b.eq": return "==";
-            case "bne": case "b.ne": return "!=";
-            case "bgt": case "b.gt": return ">";
-            case "blt": case "b.lt": return "<";
-            case "bge": case "b.ge": return ">=";
-            case "ble": case "b.le": return "<=";
+            case "b.eq": case "beq": return "==";
+            case "b.ne": case "bne": return "!=";
+            case "b.gt": case "bgt": return ">";
+            case "b.lt": case "blt": return "<";
+            case "b.ge": case "bge": return ">=";
+            case "b.le": case "ble": return "<=";
+            case "b.hi": case "bhi": return ">u";
+            case "b.ls": case "bls": return "<=u";
+            case "b.hs": case "bhs": return ">=u";
+            case "b.lo": case "blo": return "<u";
+            case "b.eq": return "==";
             default: return "";
         }
     }
 
-    private static String branchLabel(String op, PseudoCContext ctx) {
-        if (op == null) return "?";
-        // 优先用 labels 替换
-        Long addr = tryParseAddr(op);
-        if (addr != null && ctx.labels != null && ctx.labels.containsKey(addr)) {
-            return ctx.labels.get(addr);
-        }
-        return op;
-    }
-
-    private static String extractFirstAddress(String op) {
-        if (op == null) return null;
-        int hash = op.indexOf('#');
-        if (hash >= 0) return op.substring(hash + 1).trim();
-        return op.split(",")[0].trim();
+    private static boolean isArmCondBranch(String mn) {
+        if (!mn.startsWith("b") || mn.length() < 3) return false;
+        String suf = mn.substring(1);
+        return suf.equals("eq") || suf.equals("ne") || suf.equals("gt") || suf.equals("lt")
+                || suf.equals("ge") || suf.equals("le") || suf.equals("hi") || suf.equals("lo")
+                || suf.equals("hs") || suf.equals("ls") || suf.equals("cc") || suf.equals("cs")
+                || suf.equals("mi") || suf.equals("pl") || suf.equals("vc") || suf.equals("vs");
     }
 
     private static Long tryParseAddr(String s) {
@@ -157,15 +220,11 @@ public class SimplePseudoC implements PseudoCConverter {
         s = s.trim();
         if (s.startsWith("#") || s.startsWith("0x") || s.startsWith("0X")) {
             s = s.startsWith("#") ? s.substring(1) : s;
+            if (s.startsWith("0x") || s.startsWith("0X")) s = s.substring(2);
             try {
                 return Long.parseUnsignedLong(s, 16);
             } catch (NumberFormatException ignored) {}
         }
         return null;
-    }
-
-    private static long parseAddr(String s) {
-        Long l = tryParseAddr(s);
-        return l == null ? 0L : l;
     }
 }

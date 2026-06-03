@@ -1,6 +1,10 @@
 package com.soide.ui;
 
 import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,17 +20,24 @@ import com.soide.R;
 import com.soide.elf.pseudoc.PseudoCConverter;
 import com.soide.elf.pseudoc.PseudoCConverter.PseudoCContext;
 import com.soide.elf.pseudoc.PseudoCRegistry;
+import com.soide.util.ThemeUtils;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 函数详情 - 伪 C tab
+ * v1.4.3 改进：颜色用 ThemeUtils 跟随 day/night；标签/注释/调用分类着色。
  */
 public class PseudoCTabFragment extends Fragment {
 
     private static final String ARG_KEY = "key";
+    private static final Pattern LABEL_RE = Pattern.compile("^L_[0-9a-fA-F]+:\\s*$");
+    private static final Pattern CALL_RE = Pattern.compile("\\b(call|.*)\\(\\)");
 
     public static PseudoCTabFragment newInstance(FuncDetailData d) {
         PseudoCTabFragment f = new PseudoCTabFragment();
@@ -51,7 +62,6 @@ public class PseudoCTabFragment extends Fragment {
         RecyclerView rv = view.findViewById(R.id.recycler);
         rv.setLayoutManager(new LinearLayoutManager(requireContext()));
 
-        // 隐藏搜索栏
         View til = view.findViewById(R.id.til_search);
         if (til != null) til.setVisibility(View.GONE);
 
@@ -61,7 +71,6 @@ public class PseudoCTabFragment extends Fragment {
             return;
         }
 
-        // 构造 context
         Map<Long, String> labels = new HashMap<>();
         Map<Long, String> imports = new HashMap<>();
         if (d.symbols != null) {
@@ -100,13 +109,60 @@ public class PseudoCTabFragment extends Fragment {
                     ViewGroup.LayoutParams.WRAP_CONTENT));
             tv.setTextSize(11);
             tv.setTypeface(android.graphics.Typeface.MONOSPACE);
-            tv.setPadding(24, 8, 24, 8);
+            tv.setPadding(28, 8, 28, 8);
             tv.setTextIsSelectable(true);
             return new VH(tv);
         }
 
         @Override public void onBindViewHolder(@NonNull VH h, int i) {
-            h.tv.setText(lines.get(i));
+            String line = lines.get(i);
+            int primary = ThemeUtils.colorPrimary(h.tv.getContext());
+            int onSurface = ThemeUtils.colorOnSurface(h.tv.getContext());
+            int onSurfaceVariant = ThemeUtils.colorOnSurfaceVariant(h.tv.getContext());
+            int surface = ThemeUtils.colorSurface(h.tv.getContext());
+            int surfaceVariant = ThemeUtils.colorSurfaceVariant(h.tv.getContext());
+
+            SpannableString sp = new SpannableString(line);
+            // 1) L_X: 标签蓝色加粗
+            if (LABEL_RE.matcher(line).matches()) {
+                sp.setSpan(new ForegroundColorSpan(primary), 0, line.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, line.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            // 2) 注释 // 或 //
+            int cmtIdx = line.indexOf("//");
+            if (cmtIdx >= 0) {
+                sp.setSpan(new ForegroundColorSpan(onSurfaceVariant), cmtIdx, line.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            // 3) 调用 foo();
+            Matcher m = CALL_RE.matcher(line);
+            while (m.find()) {
+                int s = m.start();
+                int e = m.end();
+                if (s < 0 || e <= s) continue;
+                sp.setSpan(new ForegroundColorSpan(primary), s, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), s, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            // 4) void xxx
+            if (line.startsWith("void ")) {
+                int paren = line.indexOf('(');
+                if (paren > 0) {
+                    sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, paren,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+            }
+            // 5) return;
+            if (line.contains("return")) {
+                int idx = line.indexOf("return");
+                sp.setSpan(new ForegroundColorSpan(0xFFC62828), idx, idx + 6,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+
+            h.tv.setText(sp);
+            h.tv.setTextColor(onSurface);
+            h.tv.setBackgroundColor(i % 2 == 0 ? surface : surfaceVariant);
         }
 
         @Override public int getItemCount() { return lines.size(); }
