@@ -1,11 +1,43 @@
-*.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Build outputs
+/build/
+/app/build/
+*.apk
+*.aab
+
+# Native build artifacts
+*.o
+*.obj
+*.so
+*.lo
+*.la
+*.a
+*.lib
+*.exp
+*.pdb
+
+# CMake/Make
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build.ninja
+.ninja_*
+
+# Android
 local.properties
-/app/build
+*.iml
+.idea/
+
+# NDK
+.cxx/
+
+# Capstone/Keystone sources (downloaded in workflow)
+app/src/main/cpp/third_party/capstone/
+app/src/main/cpp/third_party/keystone/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log

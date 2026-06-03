@@ -21,15 +21,46 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-34 build-tools;34.0.0 platform-tools ndk;26.1.10909125 cmake;3.22.1"
+
+      - name: Download Capstone (反汇编真库)
+        run: |
+          set -e
+          mkdir -p app/src/main/cpp/third_party
+          cd app/src/main/cpp/third_party
+          curl -sL https://github.com/capstone-engine/capstone/archive/refs/heads/next.tar.gz -o capstone.tar.gz
+          tar xf capstone.tar.gz
+          mv capstone-next capstone
+          rm capstone.tar.gz
+          # 只保留 ARM + AArch64 架构
+          cd capstone
+          for d in arch/*; do
+              name=$(basename "$d")
+              case "$name" in
+                  ARM|AArch64) ;;
+                  *) rm -rf "$d" ;;
+              esac
+          done
+          # 移除不必要的目录与文件
+          rm -rf tests docs cstool bindings windowsce msvc xcode windows \
+                 cross_configs CMakePresets.json COMPILE.MS* \
+                 COMPILE_MAKE.TXT CONTRIB* CREDITS* SPONSORS* \
+                 CPackConfig.cmake CPackConfig.txt functions.mk make.sh \
+                 pkgconfig.mk config.mk cppext packages suite fuzz \
+                 ext_patches contrib Makefile README.md BUILDING.md LICENSES
+          echo "Capstone 准备完成:"
+          du -sh .
+
       - run: chmod +x gradlew
-      - name: Build with NDK (capstone/keystone-style native libs)
+      - name: Build with NDK (capstone-engine/capstone 静态链接)
         run: ./gradlew assembleRelease --no-daemon -Pandroid.useAndroidX=true
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SOide-APK
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
+
       - name: Attach APK to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
