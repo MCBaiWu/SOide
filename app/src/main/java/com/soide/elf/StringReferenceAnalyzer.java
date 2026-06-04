@@ -24,12 +24,18 @@ public abstract class StringReferenceAnalyzer {
 
     public static class SectionInfo {
         public final String name;
-        public final long addr;
-        public final long size;
-        public SectionInfo(String name, long addr, long size) {
+        public final long addr;        // 虚地址 (sh_addr)
+        public final long size;        // sh_size
+        public final long fileOff;     // 文件偏移 (sh_offset)，0 表示不可读（如 NOBITS）
+        public SectionInfo(String name, long addr, long size, long fileOff) {
             this.name = name;
             this.addr = addr;
             this.size = size;
+            this.fileOff = fileOff;
+        }
+        /** 兼容旧 API：默认 fileOff = 0 */
+        public SectionInfo(String name, long addr, long size) {
+            this(name, addr, size, 0);
         }
     }
 
@@ -104,9 +110,8 @@ public abstract class StringReferenceAnalyzer {
         if (sections == null) return -1;
         for (SectionInfo s : sections) {
             if (vaddr >= s.addr && vaddr < s.addr + s.size) {
-                return vaddr - s.addr; // 简化：假设 fileOff = vaddr - section.addr
-                // 实际 fileOff 应该是 fileOffInSection + s.fileOff,
-                // 但这里 SectionInfo 内部用 addr==fileOff 的简化模型
+                // 实际 fileOff = s.fileOff + (vaddr - s.addr)
+                return s.fileOff + (vaddr - s.addr);
             }
         }
         return -1;

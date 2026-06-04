@@ -157,27 +157,22 @@ public class HomeFragment extends Fragment {
 
     // ============================================================
     // Hero 卡片：渐变 primary 背景 + 大标题 + 副标题 + 版本徽章
+    // v1.4.6: 用 VipGlowCardView
     // ============================================================
     private View buildHeroCard(Context ctx) {
-        MaterialCardView hero = new MaterialCardView(ctx);
+        VipGlowCardView hero = new VipGlowCardView(ctx);
         LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         hero.setLayoutParams(heroLp);
+        hero.setColors(
+                Color.parseColor("#FF1A6EF0"),
+                Color.parseColor("#FF6B9BFF"),
+                Color.parseColor("#FF004A9F"));
+        hero.setGlowColor(Color.parseColor("#A0FFFFFF"));
         hero.setRadius(dp(24));
-        hero.setCardElevation(dp(6));
-        hero.setCardBackgroundColor(Color.parseColor("#FF1A6EF0"));
+        hero.setCardElevation(dp(8));
         hero.setPreventCornerOverlap(true);
-
-        // 用 GradientDrawable 做 primary → 深蓝的对角渐变
-        GradientDrawable gradient = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{
-                        Color.parseColor("#FF1A6EF0"),
-                        Color.parseColor("#FF004A9F")
-                });
-        gradient.setCornerRadius(dp(24));
-        hero.setBackground(gradient);
 
         LinearLayout inner = new LinearLayout(ctx);
         inner.setOrientation(LinearLayout.VERTICAL);
@@ -261,6 +256,7 @@ public class HomeFragment extends Fragment {
 
     // ============================================================
     // 功能卡：左侧彩色圆形 icon + 右侧标题/描述
+    // v1.4.6: 用 VipGlowCardView 替代 MaterialCardView，高级渐变 + 水平发光闪烁
     // ============================================================
     private View buildFeatureCard(Context ctx,
                                   @DrawableRes int iconRes,
@@ -269,16 +265,23 @@ public class HomeFragment extends Fragment {
                                   @ColorInt int accent,
                                   @ColorInt int accentContainer,
                                   int tabId) {
-        MaterialCardView card = new MaterialCardView(ctx);
+        // 三色渐变: accent → 白色淡色 → accentContainer 偏亮
+        int top = accent;
+        int mid = blendColors(accent, Color.WHITE, 0.45f);
+        int bot = blendColors(accent, Color.BLACK, 0.30f);
+
+        VipGlowCardView card = new VipGlowCardView(ctx);
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.bottomMargin = dp(12);
+        cardLp.bottomMargin = dp(14);
         card.setLayoutParams(cardLp);
-        card.setRadius(dp(20));
-        card.setCardElevation(dp(2));
-        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
-        card.setRippleColor(ColorStateList.valueOf(Color.parseColor("#1F" + colorHex(accent))));
+        card.setColors(top, mid, bot);
+        card.setGlowColor(Color.parseColor("#80FFFFFF"));
+        card.setGlowEnabled(true);
+        card.setRadius(dp(22));
+        card.setCardElevation(dp(8));
+        card.setRippleColor(ColorStateList.valueOf(Color.parseColor("#33FFFFFF")));
         card.setClickable(true);
         card.setFocusable(true);
         card.setOnClickListener(v -> {
@@ -291,9 +294,9 @@ public class HomeFragment extends Fragment {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(16), dp(16), dp(16));
+        row.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        // 圆形 icon 背景
+        // 圆形 icon 背景 (半透明白)
         FrameLayout iconBg = new FrameLayout(ctx);
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         iconLp.rightMargin = dp(16);
@@ -301,12 +304,12 @@ public class HomeFragment extends Fragment {
 
         GradientDrawable iconCircle = new GradientDrawable();
         iconCircle.setShape(GradientDrawable.OVAL);
-        iconCircle.setColor(accentContainer);
+        iconCircle.setColor(Color.parseColor("#33FFFFFF"));
         iconBg.setBackground(iconCircle);
 
         ImageView icon = new ImageView(ctx);
         icon.setImageResource(iconRes);
-        icon.setImageTintList(ColorStateList.valueOf(accent));
+        icon.setImageTintList(ColorStateList.valueOf(Color.WHITE));
         FrameLayout.LayoutParams iconInner = new FrameLayout.LayoutParams(dp(24), dp(24));
         iconInner.gravity = Gravity.CENTER;
         icon.setLayoutParams(iconInner);
@@ -322,37 +325,47 @@ public class HomeFragment extends Fragment {
 
         TextView titleTv = new TextView(ctx);
         titleTv.setText(title);
-        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         titleTv.setTypeface(titleTv.getTypeface(), android.graphics.Typeface.BOLD);
-        titleTv.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        titleTv.setTextColor(Color.WHITE);
+        titleTv.setShadowLayer(2f, 0f, 1f, Color.parseColor("#66000000"));
         textCol.addView(titleTv);
 
         TextView descTv = new TextView(ctx);
         LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        descLp.topMargin = dp(2);
+        descLp.topMargin = dp(4);
         descTv.setLayoutParams(descLp);
         descTv.setText(desc);
         descTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        descTv.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
+        descTv.setTextColor(Color.parseColor("#EEFFFFFF"));
         descTv.setLineSpacing(dp(2), 1.0f);
+        descTv.setShadowLayer(1.5f, 0f, 1f, Color.parseColor("#66000000"));
         textCol.addView(descTv);
 
         row.addView(textCol);
 
-        // 右侧箭头
+        // 右侧箭头 (白色)
         ImageView arrow = new ImageView(ctx);
         arrow.setImageResource(android.R.drawable.ic_media_play);
-        arrow.setImageTintList(ColorStateList.valueOf(ThemeUtils.colorOnSurfaceVariant(ctx)));
-        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(16), dp(16));
+        arrow.setImageTintList(ColorStateList.valueOf(Color.WHITE));
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(18), dp(18));
         arrowLp.leftMargin = dp(8);
         arrow.setLayoutParams(arrowLp);
-        // 旋转 0° 让箭头朝右（ic_media_play 默认朝右）
         row.addView(arrow);
 
         card.addView(row);
         return card;
+    }
+
+    private static int blendColors(int c1, int c2, float ratio) {
+        final float ir = 1.0f - ratio;
+        float a = Color.alpha(c1) * ir + Color.alpha(c2) * ratio;
+        float r = Color.red(c1) * ir + Color.red(c2) * ratio;
+        float g = Color.green(c1) * ir + Color.green(c2) * ratio;
+        float b = Color.blue(c1) * ir + Color.blue(c2) * ratio;
+        return Color.argb((int) a, (int) r, (int) g, (int) b);
     }
 
     // ============================================================

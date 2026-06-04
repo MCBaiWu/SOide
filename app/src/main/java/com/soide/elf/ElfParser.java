@@ -27,6 +27,24 @@ public class ElfParser {
     private SectionHeader dynsymSec;        // 用于解析重定位的符号名
     private List<SymbolEntry> dynsymForRel; // dynsym 符号列表
 
+    private boolean funcNameEnabled = true;
+
+    public ElfParser setFuncNameEnabled(boolean enabled) {
+        this.funcNameEnabled = enabled;
+        return this;
+    }
+
+    /**
+     * v1.4.6: 字符串引用分析开关。false 时直接跳过 (节省时间)。
+     * 解析前由 UI 层根据用户设置写入。
+     */
+    private volatile boolean stringRefEnabled = true;
+
+    public ElfParser setStringRefEnabled(boolean enabled) {
+        this.stringRefEnabled = enabled;
+        return this;
+    }
+
     public ElfFile parse(File file) throws IOException {
         elfFile = new ElfFile();
         elfFile.filePath = file.getAbsolutePath();
@@ -783,6 +801,15 @@ public class ElfParser {
         java.util.Collections.sort(all, (a, b) -> Long.compare(a.address, b.address));
         elfFile.functions = all;
 
+        // 1.4.6: 函数名解析 (bl 0xADDR → bl funcName)
+        if (funcNameEnabled) {
+            try {
+                FunctionNameResolver.resolveAll(all, true);
+            } catch (Throwable t) {
+                Log.w("ElfParser", "function name resolve failed", t);
+            }
+        }
+
         // 1.4.5: 字符串引用分析（ARM32 / ARM64）
         runStringReferenceAnalysis(all);
     }
@@ -793,6 +820,10 @@ public class ElfParser {
      */
     private void runStringReferenceAnalysis(List<FunctionInfo> funcs) {
         if (funcs == null || funcs.isEmpty()) return;
+        if (!stringRefEnabled) {
+            Log.i("ElfParser", "stringRef analysis disabled by user setting, skipped");
+            return;
+        }
         if (elfFile.header.eMachine != ElfConstants.EM_ARM
                 && elfFile.header.eMachine != ElfConstants.EM_AARCH64) return;
 
@@ -801,7 +832,7 @@ public class ElfParser {
         for (SectionHeader sh : elfFile.sectionHeaders) {
             if (sh.shType == ElfConstants.SHT_NOBITS) continue;
             list.add(new StringReferenceAnalyzer.SectionInfo(
-                    sh.name, sh.shAddr, sh.shSize));
+                    sh.name, sh.shAddr, sh.shSize, sh.shOffset));
         }
         StringReferenceAnalyzer.SectionInfo[] sections = list.toArray(new StringReferenceAnalyzer.SectionInfo[0]);
         StringReferenceAnalyzer analyzer = StringReferenceAnalyzerFactory.create(

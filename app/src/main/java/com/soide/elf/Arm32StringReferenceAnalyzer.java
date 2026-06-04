@@ -1,6 +1,5 @@
 package com.soide.elf;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -10,12 +9,17 @@ import java.util.List;
  * <pre>
  *   LDR  R0, =str_addr      ; 字面量池 (literal pool) 在 .text 段尾
  *   ...
- *   .word 0xXXXXXXXX         ; 4 字节存放字符串地址
+ *   .word 0xXXXXXXXX         ; 4 字节存放字符串虚地址
  *   ...
  *   LDR  R1, [R0]            ; 真正加载
  * </pre>
- * 我们追踪 LDR 指令（带 [PC, #imm] 形式或 =label 形式），从字面量池读 32-bit
- * 字符串指针，再 dereference 得到字符串内容。
+ * <p>
+ * 我们追踪：
+ * <ul>
+ *   <li>LDR Rx, =label  / LDR Rx, =0xADDR  → 直接 target</li>
+ *   <li>LDR Rx, [PC, #imm] / LDR Rx, [ip, #imm]  (Thumb) → 从字面量池读 32-bit 字符串指针</li>
+ *   <li>LDR Rx, [PC], #imm  (ARM) → 同上</li>
+ * </ul>
  */
 public class Arm32StringReferenceAnalyzer extends StringReferenceAnalyzer {
 
@@ -25,28 +29,31 @@ public class Arm32StringReferenceAnalyzer extends StringReferenceAnalyzer {
 
     @Override
     protected void analyzeArch(FunctionInfo func, List<DisassembledInstruction> insns) {
-        // 寄存器状态
-        String[] regs = {"r0","r1","r2","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12"};
+        if (insns == null) return;
+        boolean isThumb = func != null && func.isThumb;
 
         for (int i = 0; i < insns.size(); i++) {
             DisassembledInstruction ins = insns.get(i);
-            if (ins.mnemonic == null) continue;
+            if (ins == null || ins.mnemonic == null) continue;
             String m = ins.mnemonicLower();
-            String op = ins.opStr == null ? "" : ins.opStr.toLowerCase();
-            // Thumb: ldr rx, [pc, #imm] 形式
-            // ARM:  ldr rx, =label      形式
-            boolean isLdrLike = m.startsWith("ldr") && m.length() <= 6; // ldr / ldrb / ldrh
-            if (!isLdrLike) continue;
+            String op = ins.opStr == null ? "" : ins.opStr.toLowerCase().trim();
             if (op.isEmpty()) continue;
+
+            // 限定 LDR 加载字 / 加载字到寄存器的情形（取字符串指针）
+            // 排除 str/ldm/push/pop 之类
+            if (!(m.equals("ldr") || m.equals("ldr.w") || m.equals("ldrd") ||
+                  m.equals("ldrh") || m.equals("ldrb"))) {
+                continue;
+            }
 
             // 1) 找目标寄存器
             int comma = op.indexOf(',');
             if (comma <= 0) continue;
             String destReg = op.substring(0, comma).trim();
 
-            // 2) 形式 A: ldr rx, =label
+            // 2) 形式 A: ldr rx, =label / =0xADDR
             int eqIdx = op.indexOf('=');
-            if (eqIdx >= 0) {
+            if (eqIdx > 0) {
                 long target = extractHexValue(op.substring(eqIdx + 1));
                 if (target > 0 && target >= rodataStart && target < rodataEnd) {
                     registerStringRef(ins, target, "LDR=label", func, destReg);
@@ -54,28 +61,33 @@ public class Arm32StringReferenceAnalyzer extends StringReferenceAnalyzer {
                 }
             }
 
-            // 3) 形式 B: ldr rx, [pc, #imm]  (Thumb)
+            // 3) 形式 B: ldr rx, [pc, #imm] / [pc], #imm / [ip, #imm]
             int lb = op.indexOf('[');
             int rb = op.indexOf(']');
-            if (lb < 0 || rb < 0 || rb < lb) continue;
+            if (lb < 0 || rb < 0 || rb <= lb) continue;
             String inside = op.substring(lb + 1, rb).trim();
-            if (!inside.startsWith("pc") && !inside.startsWith("ip")) continue;
+            // inside 应以 "pc" 或 "ip" 开头
+            if (!(inside.startsWith("pc") || inside.startsWith("ip"))) continue;
+
             long imm = 0;
             int hash = inside.indexOf('#');
-            if (hash >= 0) imm = extractHexValue(inside.substring(hash + 1));
+            if (hash >= 0) {
+                imm = extractHexValue(inside.substring(hash + 1));
+            } else {
+                // 可能是 "pc, 0x20" 或 "pc, 20"
+                int pcComma = inside.indexOf(',');
+                if (pcComma >= 0) {
+                    imm = extractHexValue(inside.substring(pcComma + 1).trim());
+                }
+            }
+
             // PC 值：ARM 模式 +8，Thumb 模式 +4
-            long pc = func.isThumb ? (ins.address & ~1L) + 4 : ins.address + 8;
+            long pc = isThumb ? ((ins.address & ~1L) + 4) : (ins.address + 8);
             long poolAddr = (pc + imm) & ~3L;
             long fileOff = vaddrToFileOffset(poolAddr);
             if (fileOff < 0 || fileOff + 4 > fileData.length) continue;
             int ptr = readInt32LE(fileData, (int) fileOff);
-            long signedPtr = ptr & 0xFFFFFFFFL;
-            if (signedPtr < 0x80000000L) {
-                // 自然对齐
-            } else {
-                signedPtr = ptr; // 直接用 (实际 int→long 已扩展符号)
-            }
-            long strAddr = signedPtr & 0xFFFFFFFFL;
+            long strAddr = ptr & 0xFFFFFFFFL;
             if (strAddr < rodataStart || strAddr >= rodataEnd) continue;
             registerStringRef(ins, strAddr, "LDR[PC,#" + imm + "]", func, destReg);
         }
@@ -93,7 +105,7 @@ public class Arm32StringReferenceAnalyzer extends StringReferenceAnalyzer {
         ref.insnAddress = ins.address;
         ref.stringAddress = strAddr;
         ref.stringContent = content;
-        ref.functionName = func.name;
+        ref.functionName = func != null ? func.name : "";
         ref.instruction = ins.mnemonic + " " + ins.opStr;
         ref.method = method;
         addReference(ref);

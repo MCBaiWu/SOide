@@ -229,7 +229,8 @@ public class PseudoCTabFragment extends Fragment {
 
             h.tv.setText(sp);
             h.tv.setTextColor(onSurface);
-            h.tv.setBackgroundColor(i % 2 == 0 ? surface : surfaceVariant);
+            // v1.4.6: 单色背景（避免 surfaceVariant 引入"浅红"色），统一用 surface
+            h.tv.setBackgroundColor(surface);
 
             h.tv.setOnClickListener(v -> {
                 ClipboardManager cm = (ClipboardManager) h.tv.getContext()

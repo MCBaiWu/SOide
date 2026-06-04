@@ -116,6 +116,11 @@ public class ParseFragment extends Fragment {
                 currentFilePath = tempFile.getAbsolutePath();
 
                 ElfParser parser = new ElfParser();
+                // v1.4.6: 根据用户设置决定是否启用字符串引用分析 + 函数名解析
+                boolean stringRefOn = com.soide.util.SettingsPrefs.isStringRefEnabled(requireContext());
+                boolean funcNameOn = com.soide.util.SettingsPrefs.isFuncNameEnabled(requireContext());
+                parser.setStringRefEnabled(stringRefOn);
+                parser.setFuncNameEnabled(funcNameOn);
                 ElfFile elfFile = parser.parse(tempFile);
 
                 // 缓存 + 历史

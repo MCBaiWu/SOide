@@ -56,12 +56,13 @@ public class DetailAdapter extends RecyclerView.Adapter<DetailAdapter.VH> {
         h.meta.setText(it.meta != null ? it.meta : "");
         h.type.setText(it.type != null ? it.type : "");
         h.root.setOnClickListener(v -> {
-            // 1) 默认复制
-            copyItemToClipboard(h.itemView.getContext(), it);
-            // 2) 自定义点击回调
+            // v1.4.6: 点击弹出详情对话框（对话框里每行可点复制）
+            ItemDetailDialog.show(h.itemView.getContext(), it);
+            // 自定义回调
             if (onClick != null) onClick.onClick(it);
         });
         h.root.setOnLongClickListener(v -> {
+            // 长按：复制整行到剪贴板
             copyItemToClipboard(h.itemView.getContext(), it);
             return true;
         });

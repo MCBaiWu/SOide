@@ -28,8 +28,10 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.materialswitch.MaterialSwitch;
 import com.soide.R;
 import com.soide.util.PermissionHelper;
+import com.soide.util.SettingsPrefs;
 import com.soide.util.ThemeUtils;
 
 import java.lang.reflect.Method;
@@ -104,6 +106,10 @@ public class SettingsFragment extends Fragment {
         // === 主题卡片 ===
         content.addView(buildSectionTitle(ctx, "外观"));
         content.addView(buildThemeCard(ctx));
+
+        // === 反汇编分析卡片 (v1.4.6) ===
+        content.addView(buildSectionTitle(ctx, "反汇编分析"));
+        content.addView(buildDisasmCard(ctx));
 
         // === 权限卡片 ===
         content.addView(buildSectionTitle(ctx, "权限"));
@@ -219,6 +225,115 @@ public class SettingsFragment extends Fragment {
             if (themeRadioIds[i] == checkedId) return i;
         }
         return -1;
+    }
+
+    // ==================== 反汇编分析卡片 (v1.4.6) ====================
+    private View buildDisasmCard(Context ctx) {
+        MaterialCardView card = new MaterialCardView(ctx);
+        card.setRadius(dp(20));
+        card.setCardElevation(dp(2));
+        card.setCardBackgroundColor(ThemeUtils.colorSurface(ctx));
+
+        LinearLayout inner = new LinearLayout(ctx);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setPadding(dp(20), dp(16), dp(20), dp(16));
+
+        TextView head = new TextView(ctx);
+        head.setText("反汇编分析选项");
+        head.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        head.setTypeface(head.getTypeface(), android.graphics.Typeface.BOLD);
+        head.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        inner.addView(head);
+
+        TextView desc = new TextView(ctx);
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dl.topMargin = dp(4);
+        desc.setLayoutParams(dl);
+        desc.setText("控制反汇编阶段的智能分析功能。关闭后解析更快，结果中不再显示相关内容。");
+        desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        desc.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
+        inner.addView(desc);
+
+        // ---- 引用字符串开关 ----
+        addSwitchRow(ctx, inner,
+                "引用字符串",
+                "识别 LDR / ADR / ADRP+ADD 指向的字符串，并在反汇编中高亮显示。",
+                SettingsPrefs.isStringRefEnabled(ctx),
+                (v) -> {
+                    SettingsPrefs.setStringRefEnabled(ctx, v);
+                    Toast.makeText(ctx,
+                            v ? "已启用引用字符串 (下次解析生效)" : "已关闭引用字符串",
+                            Toast.LENGTH_SHORT).show();
+                });
+
+        // ---- 函数名解析开关 ----
+        addSwitchRow(ctx, inner,
+                "解析函数名 (bl 目标)",
+                "bl 0x12345 显示为 bl sub_12345 / bl funcName，提高可读性。",
+                SettingsPrefs.isFuncNameEnabled(ctx),
+                (v) -> {
+                    SettingsPrefs.setFuncNameEnabled(ctx, v);
+                    Toast.makeText(ctx,
+                            v ? "已启用函数名解析" : "已关闭函数名解析",
+                            Toast.LENGTH_SHORT).show();
+                });
+
+        card.addView(inner);
+        return card;
+    }
+
+    private void addSwitchRow(Context ctx, LinearLayout parent,
+                              String title, String sub, boolean checked,
+                              OnSwitchChangedListener listener) {
+        LinearLayout row = new LinearLayout(ctx);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        row.setLayoutParams(lp);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBaselineAligned(true);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        // 文字部分
+        LinearLayout txtCol = new LinearLayout(ctx);
+        txtCol.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams tcp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        txtCol.setLayoutParams(tcp);
+
+        TextView t = new TextView(ctx);
+        t.setText(title);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        t.setTypeface(t.getTypeface(), android.graphics.Typeface.BOLD);
+        t.setTextColor(ThemeUtils.colorOnSurface(ctx));
+        txtCol.addView(t);
+
+        TextView s = new TextView(ctx);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sp.topMargin = dp(2);
+        s.setLayoutParams(sp);
+        s.setText(sub);
+        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        s.setTextColor(ThemeUtils.colorOnSurfaceVariant(ctx));
+        txtCol.addView(s);
+
+        row.addView(txtCol);
+
+        // 开关
+        MaterialSwitch sw = new MaterialSwitch(ctx);
+        sw.setChecked(checked);
+        sw.setOnCheckedChangeListener((btn, isChecked) -> {
+            if (listener != null) listener.onChanged(isChecked);
+        });
+        row.addView(sw);
+
+        parent.addView(row);
+    }
+
+    private interface OnSwitchChangedListener {
+        void onChanged(boolean checked);
     }
 
     private View buildPermissionCard(Context ctx) {

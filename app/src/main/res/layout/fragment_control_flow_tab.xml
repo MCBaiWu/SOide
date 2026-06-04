@@ -15,20 +15,36 @@
         android:fontFamily="monospace"
         android:background="?attr/colorSurfaceVariant" />
 
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/tv_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="6dp"
+        android:textSize="10sp"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:fontFamily="monospace"
+        android:text="双指缩放 · 单指拖动 · 双击重置"
+        android:gravity="center"
+        android:background="?attr/colorSurfaceVariant" />
+
     <androidx.core.widget.NestedScrollView
         android:id="@+id/scroll"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:fillViewport="true">
 
         <HorizontalScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:fillViewport="true">
 
             <com.soide.ui.CfgCanvasView
                 android:id="@+id/cfg_canvas"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:padding="8dp" />
+                android:padding="8dp"
+                android:minWidth="320dp"
+                android:minHeight="240dp" />
         </HorizontalScrollView>
     </androidx.core.widget.NestedScrollView>
 </LinearLayout>

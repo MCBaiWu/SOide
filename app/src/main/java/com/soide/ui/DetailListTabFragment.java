@@ -143,15 +143,22 @@ public class DetailListTabFragment extends Fragment {
         switch (kind) {
             case KIND_SECTION:
                 if (elf.sectionHeaders != null) {
+                    int idx = 0;
                     for (com.soide.elf.SectionHeader s : elf.sectionHeaders) {
                         DetailAdapter.Item it = new DetailAdapter.Item();
-                        it.type = s.name != null ? s.name : "(unnamed)";
-                        it.title = s.name != null ? s.name : "(unnamed)";
-                        it.subtitle = com.soide.elf.ElfParser.sectionTypeName(s.shType)
-                                + "  size=" + s.shSize;
-                        it.meta = String.format("addr=0x%x off=0x%x",
-                                s.shAddr, s.shOffset);
+                        // v1.4.6: 节区标签页不再显示节区名，改为显示编号 + 类型
+                        it.type = "节区 #" + idx;
+                        String typeName = com.soide.elf.ElfParser.sectionTypeName(s.shType);
+                        it.title = typeName; // e.g. SHT_PROGBITS
+                        it.subtitle = "size=" + s.shSize + "  flags=0x" + Long.toHexString(s.shFlags);
+                        it.meta = String.format("addr=0x%x  off=0x%x  link=%d",
+                                s.shAddr, s.shOffset, s.shLink);
+                        it.copyText = String.format("%s  #%d  %s  addr=0x%x  off=0x%x  size=%d  flags=0x%x",
+                                typeName, idx,
+                                s.name != null ? s.name : "(unnamed)",
+                                s.shAddr, s.shOffset, s.shSize, s.shFlags);
                         list.add(it);
+                        idx++;
                     }
                 }
                 break;

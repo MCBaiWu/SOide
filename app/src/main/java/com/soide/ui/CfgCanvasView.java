@@ -8,6 +8,7 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.text.TextPaint;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -15,16 +16,13 @@ import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 
-import com.soide.R;
 import com.soide.elf.ControlFlowAnalyzer;
 import com.soide.elf.DisassembledInstruction;
 import com.soide.util.ThemeUtils;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -36,48 +34,58 @@ import java.util.Set;
 /**
  * 控制流图 (CFG) Canvas 视图。
  * <p>
- * v1.4.5 改进：
+ * v1.4.6 改进：
  * <ul>
- *   <li>布局：BFS 层级布局 (树状)，每个基本块 y 由其层级决定，x 在层级内均匀分布
- *       (针对环 / 多入口：同块只放一个位置)</li>
- *   <li>边：紧邻前向走短竖线；非紧邻前向走右侧通道；回边走左侧通道 — 绝不穿块</li>
- *   <li>边颜色：TRUE_BRANCH 绿 / FALSE_BRANCH 红 / UNCONDITIONAL 蓝</li>
- *   <li>手势：单指拖动 (pan) + 双指捏合 (zoom)，自适应 day/night</li>
- *   <li>块填充：跟随 ?attr/colorSurface (夜间深、昼间浅)；entry 块用 ?attr/colorPrimaryContainer</li>
+ *   <li>布局：BFS 层级布局 + 每层独立计算 X (不跨层居中，块就在最左侧，避免远在画布右侧)</li>
+ *   <li>预计算：setCfg() 时一次性 computeLayout() 算出每个 block 的 (x,y) 矩形</li>
+ *   <li>自适应缩放：初次显示时按 View 实际大小做 fit-to-width (避免大函数看不到入口)</li>
+ *   <li>边：真分支绿 / 假分支红 / 无条件蓝, 紧邻前向短竖线, 非紧邻走右侧通道</li>
+ *   <li>手势：单指 pan + 双指 pinch-zoom, 范围 0.2x ~ 4x</li>
+ *   <li>主题色：跟随 day/night; 入口块主色, 出口块错误色</li>
  * </ul>
  */
 public class CfgCanvasView extends View {
 
+    private static final String TAG = "CfgCanvasView";
+
     private static final float BLOCK_TITLE_H_DP = 22f;
-    private static final float BLOCK_LINE_H_DP = 16f;
-    private static final float BLOCK_PAD_H_DP = 14f;
-    private static final float BLOCK_PAD_V_DP = 10f;
-    private static final float BLOCK_GAP_X_DP = 36f;
+    private static final float BLOCK_LINE_H_DP = 15f;
+    private static final float BLOCK_PAD_H_DP = 12f;
+    private static final float BLOCK_PAD_V_DP = 8f;
+    private static final float BLOCK_GAP_X_DP = 32f;
     private static final float BLOCK_GAP_Y_DP = 36f;
-    private static final float EDGE_OFFSET_DP = 18f;
+    private static final float EDGE_OFFSET_DP = 16f;
     private static final float TEXT_SIZE_DP = 11f;
-    private static final float MIN_SCALE = 0.3f;
-    private static final float MAX_SCALE = 3.0f;
+    private static final float TITLE_TEXT_SP = 12f;
+    private static final float MIN_SCALE = 0.2f;
+    private static final float MAX_SCALE = 4.0f;
+    private static final float MAX_BLOCK_W_DP = 240f;
 
     private ControlFlowAnalyzer.CFG cfg;
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint blockFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint blockStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint labelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint arrowFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    /** key = block.startAddr, value = (x,y,w,h) in unscaled content space */
     private final Map<Long, RectF> blockRects = new HashMap<>();
     private final Map<Long, Integer> blockLevel = new HashMap<>();
     private final Map<Integer, List<Long>> levelBlocks = new HashMap<>();
 
     private float contentWidth = 0f;
     private float contentHeight = 0f;
+    private int maxLevel = 0;
 
     // === 手势 ===
     private float scale = 1f;
     private float offsetX = 0f;
     private float offsetY = 0f;
+    private float minScale = MIN_SCALE;  // 重新自适应后更新
+    private boolean didAutoFit = false;
     private ScaleGestureDetector scaleDetector;
     private GestureDetector gestureDetector;
 
@@ -88,10 +96,11 @@ public class CfgCanvasView extends View {
     private void init(Context ctx) {
         textPaint.setTypeface(android.graphics.Typeface.MONOSPACE);
         textPaint.setTextSize(sp(ctx, TEXT_SIZE_DP));
-        textPaint.setColor(ThemeUtils.colorOnSurface(ctx));
+        titlePaint.setTypeface(android.graphics.Typeface.MONOSPACE);
+        titlePaint.setTextSize(sp(ctx, TITLE_TEXT_SP));
+        titlePaint.setFakeBoldText(true);
         labelPaint.setTypeface(android.graphics.Typeface.MONOSPACE);
         labelPaint.setTextSize(sp(ctx, TEXT_SIZE_DP));
-        labelPaint.setColor(ThemeUtils.colorOnSurface(ctx));
         blockFill.setStyle(Paint.Style.FILL);
         blockStroke.setStyle(Paint.Style.STROKE);
         blockStroke.setStrokeWidth(dp(ctx, 1.2f));
@@ -99,14 +108,19 @@ public class CfgCanvasView extends View {
         edgePaint.setStrokeWidth(dp(ctx, 1.6f));
         edgePaint.setStrokeCap(Paint.Cap.ROUND);
         arrowFill.setStyle(Paint.Style.FILL);
+        gridPaint.setStyle(Paint.Style.STROKE);
+        gridPaint.setStrokeWidth(dp(ctx, 0.5f));
         setLayerType(LAYER_TYPE_SOFTWARE, null);
+
+        // 背景
+        setBackgroundColor(ThemeUtils.colorSurface(ctx));
 
         // 手势检测
         scaleDetector = new ScaleGestureDetector(ctx, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
                 float factor = detector.getScaleFactor();
-                scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * factor));
+                scale = Math.max(minScale, Math.min(MAX_SCALE, scale * factor));
                 invalidate();
                 return true;
             }
@@ -121,32 +135,58 @@ public class CfgCanvasView extends View {
             }
             @Override
             public boolean onDown(MotionEvent e) { return true; }
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                // 双击重置视图
+                autoFit();
+                invalidate();
+                return true;
+            }
         });
     }
 
     public void setCfg(ControlFlowAnalyzer.CFG cfg) {
+        Log.i(TAG, "setCfg blocks=" + (cfg != null && cfg.blocks != null ? cfg.blocks.size() : 0));
         this.cfg = cfg;
-        blockRects.clear();
-        blockLevel.clear();
-        levelBlocks.clear();
+        didAutoFit = false;
+        scale = 1f;
+        offsetX = 0f;
+        offsetY = 0f;
+        computeLayout();
         requestLayout();
         invalidate();
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent ev) {
-        boolean a = scaleDetector.onTouchEvent(ev);
-        boolean b = gestureDetector.onTouchEvent(ev);
-        return a || b || super.onTouchEvent(ev);
-    }
-
-    /** 计算每个 block 所属的"层级"，用于树状布局。BFS 从 entry 开始。 */
-    private void computeLevels() {
+    /**
+     * 一次性预计算布局:
+     *  1) BFS 给每个 block 分配层级
+     *  2) 估算每个 block 的宽/高
+     *  3) 按层级均匀分配 X 位置
+     *  4) 算出 contentWidth/contentHeight
+     */
+    private void computeLayout() {
+        blockRects.clear();
         blockLevel.clear();
         levelBlocks.clear();
-        if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) return;
+        contentWidth = 0f;
+        contentHeight = 0f;
+        maxLevel = 0;
 
-        // 找 entry
+        if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) {
+            return;
+        }
+
+        Context ctx = getContext();
+        float pad = dp(ctx, BLOCK_PAD_H_DP);
+        float vPad = dp(ctx, BLOCK_PAD_V_DP);
+        float titleH = dp(ctx, BLOCK_TITLE_H_DP);
+        float lineH = dp(ctx, BLOCK_LINE_H_DP);
+        float gapX = dp(ctx, BLOCK_GAP_X_DP);
+        float gapY = dp(ctx, BLOCK_GAP_Y_DP);
+        float edgeOff = dp(ctx, EDGE_OFFSET_DP);
+        float maxW = dp(ctx, MAX_BLOCK_W_DP);
+
+        // 1) BFS 分配层级
         ControlFlowAnalyzer.Block entry = null;
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             if (b.isEntry) { entry = b; break; }
@@ -173,16 +213,87 @@ public class CfgCanvasView extends View {
                 if (next != null) q.add(next);
             }
         }
-        // unreachable blocks → 放在最后一行
-        int maxLevel = 0;
-        for (int l : blockLevel.values()) if (l > maxLevel) maxLevel = l;
+        // unreachable -> 最后一行
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             if (!visited.contains(b.startAddr)) {
-                int l = maxLevel + 1;
+                int l = maxLevel() + 1;
                 blockLevel.put(b.startAddr, l);
                 addToLevel(l, b.startAddr);
             }
         }
+        maxLevel = maxLevel();
+
+        // 2) 估算每个 block 的宽/高 (写回 Block.extra*)
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            int lines = Math.min(8, b.instructions.size());
+            float h = vPad * 2 + titleH + lineH * lines;
+            float w = 0f;
+            String addrTxt = String.format(Locale.US, "0x%x", b.startAddr);
+            w = Math.max(w, titlePaint.measureText(addrTxt));
+            for (int i = 0; i < Math.min(3, b.instructions.size()); i++) {
+                DisassembledInstruction ins = b.instructions.get(i);
+                String line = String.format(Locale.US, "%-7s %s",
+                        ins.mnemonic != null ? ins.mnemonic : "",
+                        ins.opStr != null ? ins.opStr : "");
+                w = Math.max(w, textPaint.measureText(line));
+            }
+            float blockW = Math.min(maxW, pad * 2 + w);
+            b.extraMeasuredWidth = blockW;
+            b.extraMeasuredHeight = h;
+        }
+
+        // 3) 按层级摆放 (每层内左对齐, X 直接从 edgeOff 开始)
+        // 找最宽层级宽度作为 contentWidth
+        float widestLevelW = 0f;
+        Map<Integer, Float> levelWidths = new HashMap<>();
+        for (Map.Entry<Integer, List<Long>> e : levelBlocks.entrySet()) {
+            int level = e.getKey();
+            List<Long> addrs = e.getValue();
+            float lw = 0f;
+            for (int i = 0; i < addrs.size(); i++) {
+                ControlFlowAnalyzer.Block b = findBlock(addrs.get(i));
+                if (b == null) continue;
+                lw += b.extraMeasuredWidth;
+            }
+            lw += gapX * Math.max(0, addrs.size() - 1);
+            levelWidths.put(level, lw);
+            if (lw > widestLevelW) widestLevelW = lw;
+        }
+
+        float totalW = widestLevelW + edgeOff * 2 + dp(ctx, 16f);
+        float levelH = dp(ctx, 60f);   // 块 + 间隔
+        float totalH = (maxLevel + 1) * levelH + gapY + dp(ctx, 16f);
+        if (totalW < dp(ctx, 280f)) totalW = dp(ctx, 280f);
+        if (totalH < dp(ctx, 200f)) totalH = dp(ctx, 200f);
+        contentWidth = totalW;
+        contentHeight = totalH;
+
+        // 4) 摆放每个 block
+        for (Map.Entry<Integer, List<Long>> e : levelBlocks.entrySet()) {
+            int level = e.getKey();
+            List<Long> addrs = e.getValue();
+            float layerW = levelWidths.get(level);
+            // 每层 x0: 左对齐 (从 edgeOff 开始)
+            float layerX0 = edgeOff + dp(ctx, 8f);
+            float y = dp(ctx, 8f) + level * levelH;
+            float x = layerX0;
+            for (int i = 0; i < addrs.size(); i++) {
+                long addr = addrs.get(i);
+                ControlFlowAnalyzer.Block b = findBlock(addr);
+                if (b == null) continue;
+                RectF r = new RectF(x, y, x + b.extraMeasuredWidth, y + b.extraMeasuredHeight);
+                blockRects.put(addr, r);
+                x += b.extraMeasuredWidth + gapX;
+            }
+        }
+        Log.i(TAG, "computeLayout contentW=" + contentWidth + " contentH=" + contentHeight
+                + " maxLevel=" + maxLevel + " blocks=" + blockRects.size());
+    }
+
+    private int maxLevel() {
+        int m = 0;
+        for (int l : blockLevel.values()) if (l > m) m = l;
+        return m;
     }
 
     private void addToLevel(int level, long addr) {
@@ -205,106 +316,99 @@ public class CfgCanvasView extends View {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) {
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            int w = resolveSize((int) dp(getContext(), 320f), widthMeasureSpec);
+            int h = resolveSize((int) dp(getContext(), 240f), heightMeasureSpec);
+            setMeasuredDimension(w, h);
             return;
         }
-        Context ctx = getContext();
-        float pad = dp(ctx, BLOCK_PAD_H_DP);
-        float maxW = dp(ctx, 280f);
-        float lineH = dp(ctx, BLOCK_LINE_H_DP);
-        float titleH = dp(ctx, BLOCK_TITLE_H_DP);
-        float vPad = dp(ctx, BLOCK_PAD_V_DP);
-        float gapX = dp(ctx, BLOCK_GAP_X_DP);
-        float gapY = dp(ctx, BLOCK_GAP_Y_DP);
-        float edgeOff = dp(ctx, EDGE_OFFSET_DP);
-
-        // 计算每块高 / 宽
-        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
-            int lines = Math.min(8, b.instructions.size());
-            float h = vPad * 2 + titleH + lineH * lines;
-            float w = 0f;
-            String addrTxt = String.format(Locale.US, "0x%x", b.startAddr);
-            w = Math.max(w, textPaint.measureText(addrTxt));
-            for (int i = 0; i < Math.min(3, b.instructions.size()); i++) {
-                DisassembledInstruction ins = b.instructions.get(i);
-                String line = String.format(Locale.US, "%-7s %s",
-                        ins.mnemonic, ins.opStr != null ? ins.opStr : "");
-                w = Math.max(w, textPaint.measureText(line));
-            }
-            float blockW = Math.min(maxW, pad * 2 + w);
-            b.extraMeasuredWidth = blockW;
-            b.extraMeasuredHeight = h;
-        }
-
-        // 树状布局：按层级摆放
-        computeLevels();
-        int maxLevel = 0;
-        int widestLevelCount = 0;
-        for (int l : levelBlocks.keySet()) {
-            if (l > maxLevel) maxLevel = l;
-            if (levelBlocks.get(l).size() > widestLevelCount) widestLevelCount = levelBlocks.get(l).size();
-        }
-        // 最宽层决定总宽
-        float maxBlockW = 0f;
-        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
-            if (b.extraMeasuredWidth > maxBlockW) maxBlockW = b.extraMeasuredWidth;
-        }
-        float totalW = widestLevelCount * (maxBlockW + gapX) - gapX + edgeOff * 2 + dp(ctx, 16f);
-        float totalH = (maxLevel + 1) * (dp(ctx, 60f) + gapY) + dp(ctx, 32f);
-        if (totalW < dp(ctx, 320f)) totalW = dp(ctx, 320f);
-        if (totalH < dp(ctx, 240f)) totalH = dp(ctx, 240f);
-        contentWidth = totalW;
-        contentHeight = totalH;
-
         int width = resolveSize((int) Math.ceil(contentWidth), widthMeasureSpec);
         int height = resolveSize((int) Math.ceil(contentHeight), heightMeasureSpec);
         setMeasuredDimension(width, height);
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (!didAutoFit && w > 0 && h > 0 && contentWidth > 0) {
+            autoFit();
+            didAutoFit = true;
+            invalidate();
+        }
+    }
+
+    /** 自适应缩放: 让 entry block 落在视图中央并 fit 到可视范围 */
+    private void autoFit() {
+        if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) return;
+        ControlFlowAnalyzer.Block entry = null;
+        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
+            if (b.isEntry) { entry = b; break; }
+        }
+        if (entry == null) entry = cfg.blocks.get(0);
+        RectF er = blockRects.get(entry.startAddr);
+        if (er == null) return;
+
+        int vw = getWidth();
+        int vh = getHeight();
+        if (vw <= 0 || vh <= 0) return;
+
+        // 选择合适的 scale
+        float sX = (vw - dp(getContext(), 32f)) / contentWidth;
+        float sY = (vh - dp(getContext(), 32f)) / contentHeight;
+        float s = Math.min(sX, sY);
+        if (s < MIN_SCALE) s = MIN_SCALE;
+        if (s > 1.0f) s = 1.0f;   // 不要放大
+        scale = s;
+        minScale = Math.max(MIN_SCALE, s * 0.5f);
+
+        // 偏移: 让 entry 块的中心在视图中心
+        float entryCx = er.centerX();
+        float entryCy = er.centerY();
+        offsetX = vw / 2f - entryCx * scale;
+        offsetY = vh / 2f - entryCy * scale;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        boolean a = scaleDetector.onTouchEvent(ev);
+        boolean b = gestureDetector.onTouchEvent(ev);
+        return a || b || super.onTouchEvent(ev);
+    }
+
+    @Override
     protected void onDraw(Canvas c) {
         super.onDraw(c);
-        if (cfg == null || cfg.blocks.isEmpty()) return;
         Context ctx = getContext();
 
         // 主题色 (跟随 day/night)
         int surface = ThemeUtils.colorSurface(ctx);
-        int surfaceVariant = ThemeUtils.colorSurfaceVariant(ctx);
+        int outline = ThemeUtils.colorOutline(ctx);
         int onSurface = ThemeUtils.colorOnSurface(ctx);
         c.drawColor(surface);
+
+        if (cfg == null || cfg.blocks == null || cfg.blocks.isEmpty()) {
+            textPaint.setColor(onSurface);
+            textPaint.setTextSize(sp(ctx, 14f));
+            String msg = "无控制流数据";
+            float tw = textPaint.measureText(msg);
+            c.drawText(msg, (getWidth() - tw) / 2f, getHeight() / 2f, textPaint);
+            return;
+        }
+
+        // 背景网格 (轻)
+        if (blockRects.isEmpty()) {
+            // 还没布局, 退化为画一个提示
+            textPaint.setColor(onSurface);
+            textPaint.setTextSize(sp(ctx, 14f));
+            String msg = "CFG 布局中...";
+            float tw = textPaint.measureText(msg);
+            c.drawText(msg, (getWidth() - tw) / 2f, getHeight() / 2f, textPaint);
+            return;
+        }
 
         // 应用平移/缩放
         c.save();
         c.translate(offsetX, offsetY);
         c.scale(scale, scale);
-
-        float gapX = dp(ctx, BLOCK_GAP_X_DP);
-        float gapY = dp(ctx, BLOCK_GAP_Y_DP);
-        float edgeOff = dp(ctx, EDGE_OFFSET_DP);
-        float blockY0 = dp(ctx, 16f);
-
-        // 计算每块 (x, y)
-        blockRects.clear();
-        // 每层总宽，居中
-        float maxBlockW = 0f;
-        for (ControlFlowAnalyzer.Block b : cfg.blocks) {
-            if (b.extraMeasuredWidth > maxBlockW) maxBlockW = b.extraMeasuredWidth;
-        }
-        for (Map.Entry<Integer, List<Long>> e : levelBlocks.entrySet()) {
-            int level = e.getKey();
-            List<Long> addrs = e.getValue();
-            float layerW = addrs.size() * (maxBlockW + gapX) - gapX;
-            float layerX0 = edgeOff + dp(ctx, 8f) + (contentWidth - edgeOff * 2 - dp(ctx, 16f) - layerW) / 2f;
-            for (int i = 0; i < addrs.size(); i++) {
-                long addr = addrs.get(i);
-                ControlFlowAnalyzer.Block b = findBlock(addr);
-                if (b == null) continue;
-                float x = layerX0 + i * (maxBlockW + gapX);
-                float y = blockY0 + level * (dp(ctx, 60f) + gapY);
-                RectF r = new RectF(x, y, x + b.extraMeasuredWidth, y + b.extraMeasuredHeight);
-                blockRects.put(addr, r);
-            }
-        }
 
         // 1) 画边
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
@@ -320,53 +424,68 @@ public class CfgCanvasView extends View {
         for (ControlFlowAnalyzer.Block b : cfg.blocks) {
             RectF r = blockRects.get(b.startAddr);
             if (r == null) continue;
-            drawBlock(c, b, r, surface, surfaceVariant, onSurface);
+            drawBlock(c, b, r, surface, outline, onSurface);
         }
 
         c.restore();
     }
 
     private void drawBlock(Canvas c, ControlFlowAnalyzer.Block b, RectF r,
-                           int surface, int surfaceVariant, int onSurface) {
+                           int surface, int outline, int onSurface) {
         Context ctx = getContext();
-        // 背景：entry 用 primary tint，exit 用 error tint，普通块用 surface
+        int primary = ThemeUtils.colorPrimary(ctx);
+        int onPrimary = ThemeUtils.colorOnPrimary(ctx);
+        int error = ThemeUtils.colorError(ctx);
+
+        // 背景
         int fill;
-        if (b.isEntry) fill = ThemeUtils.colorPrimary(ctx);
-        else if (b.isExit) fill = ThemeUtils.colorError(ctx);
-        else fill = surface;
+        int txtColor;
+        if (b.isEntry) {
+            fill = primary;
+            txtColor = onPrimary;
+        } else if (b.isExit) {
+            fill = error;
+            txtColor = Color.WHITE;
+        } else {
+            fill = surface;
+            txtColor = onSurface;
+        }
         blockFill.setColor(fill);
-        c.drawRoundRect(r, dp(ctx, 8f), dp(ctx, 8f), blockFill);
-        int stroke = b.isExit ? ThemeUtils.colorError(ctx) : ThemeUtils.colorOutline(ctx);
-        blockStroke.setColor(stroke);
-        blockStroke.setStrokeWidth(b.isExit ? dp(ctx, 2.2f) : dp(ctx, 1.2f));
-        c.drawRoundRect(r, dp(ctx, 8f), dp(ctx, 8f), blockStroke);
+        c.drawRoundRect(r, dp(ctx, 6f), dp(ctx, 6f), blockFill);
+        blockStroke.setColor(b.isEntry || b.isExit ? txtColor : outline);
+        blockStroke.setStrokeWidth((b.isEntry || b.isExit) ? dp(ctx, 2f) : dp(ctx, 1f));
+        c.drawRoundRect(r, dp(ctx, 6f), dp(ctx, 6f), blockStroke);
 
         // 标题
         float textX = r.left + dp(ctx, BLOCK_PAD_H_DP);
-        float titleY = r.top + dp(ctx, BLOCK_PAD_V_DP) + dp(ctx, BLOCK_TITLE_H_DP) - dp(ctx, 3f);
-        int titleColor = (b.isEntry || b.isExit) ? Color.WHITE : onSurface;
-        textPaint.setColor(titleColor);
-        textPaint.setFakeBoldText(true);
-        textPaint.setTextSize(sp(ctx, 12f));
-        String tag = (b.isEntry ? "▶ ENTRY " : (b.isExit ? "■ EXIT  " : "BB     "))
+        float titleY = r.top + dp(ctx, BLOCK_PAD_V_DP) + dp(ctx, BLOCK_TITLE_H_DP) - dp(ctx, 4f);
+        titlePaint.setColor(txtColor);
+        titlePaint.setTextSize(sp(ctx, TITLE_TEXT_SP));
+        String tag = (b.isEntry ? "▶ ENTRY " : (b.isExit ? "■ EXIT  " : "      BB "))
                 + String.format(Locale.US, "0x%x", b.startAddr);
-        c.drawText(tag, textX, titleY, textPaint);
-        textPaint.setFakeBoldText(false);
-        textPaint.setTextSize(sp(ctx, TEXT_SIZE_DP));
+        c.drawText(tag, textX, titleY, titlePaint);
 
         // 指令
         float insY = titleY + dp(ctx, BLOCK_LINE_H_DP);
         float lineH = dp(ctx, BLOCK_LINE_H_DP);
-        int branchColor = ThemeUtils.colorPrimary(ctx);
-        int normalColor = (b.isEntry || b.isExit) ? Color.WHITE
+        int branchColor = b.isEntry || b.isExit ? txtColor : ThemeUtils.colorPrimary(ctx);
+        int normalColor = b.isEntry || b.isExit ? txtColor
                 : ThemeUtils.colorOnSurfaceVariant(ctx);
-        for (int i = 0; i < Math.min(8, b.instructions.size()); i++) {
+        int maxLines = Math.min(8, b.instructions.size());
+        textPaint.setTextSize(sp(ctx, TEXT_SIZE_DP));
+        for (int i = 0; i < maxLines; i++) {
             DisassembledInstruction ins = b.instructions.get(i);
             String mn = ins.mnemonic != null ? ins.mnemonic : "";
             String op = ins.opStr != null ? ins.opStr : "";
             String line = String.format(Locale.US, "%-7s %s", mn, op);
             textPaint.setColor(isBranchMnemonic(mn) ? branchColor : normalColor);
             c.drawText(line, textX, insY + i * lineH, textPaint);
+        }
+        // 如果指令超过显示数, 加 "..." 提示
+        if (b.instructions.size() > maxLines) {
+            textPaint.setColor(normalColor);
+            c.drawText("... +" + (b.instructions.size() - maxLines) + " 条",
+                    textX, insY + maxLines * lineH, textPaint);
         }
     }
 
